@@ -37,26 +37,30 @@ type UiModel struct {
 	noteInput             []string // Multiline note input
 	showLinksDialog       bool     // Track links widget visibility
 	currentLinkIdx        int      // Track selected link
+	showDeleteNoteDialog  bool     // Track delete note confirmation dialog
+	deleteNoteConfirmIdx  int      // Track selected option in delete confirmation (0=No, 1=Yes)
 }
 
 func InitialModel(filePath string) UiModel {
 	m := UiModel{
-		tabs:            []string{"Texto", "Vocabulario", "Notas"},
-		currentTab:      0,
-		currentLine:     0,
-		currentWordIdx:  0,
-		currentVocabIdx: 0,
-		currentNoteIdx:  0,
-		currentLinkIdx:  0,
-		selectedWord:    "",
-		showDialog:      false,
-		lineInput:       "",
-		tabWidths:       make([]int, 3), // Initialize for 3 tabs
-		vocabulary:      []string{},
-		notes:           []string{},
-		showNoteDialog:  false,
-		noteInput:       []string{""},
-		showLinksDialog: false,
+		tabs:                 []string{"Texto", "Vocabulario", "Notas"},
+		currentTab:           0,
+		currentLine:          0,
+		currentWordIdx:       0,
+		currentVocabIdx:      0,
+		currentNoteIdx:       0,
+		currentLinkIdx:       0,
+		selectedWord:         "",
+		showDialog:           false,
+		lineInput:            "",
+		tabWidths:            make([]int, 3), // Initialize for 3 tabs
+		vocabulary:           []string{},
+		notes:                []string{},
+		showNoteDialog:       false,
+		noteInput:            []string{""},
+		showLinksDialog:      false,
+		showDeleteNoteDialog: false,
+		deleteNoteConfirmIdx: 0, // Default to "No"
 	}
 
 	m.filePath = filePath
@@ -202,6 +206,34 @@ func (m UiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return m, nil
 		}
+		if m.showDeleteNoteDialog {
+			switch msg.String() {
+			case "esc":
+				m.showDeleteNoteDialog = false
+				m.deleteNoteConfirmIdx = 0
+			case "left", "h":
+				m.deleteNoteConfirmIdx = 0 // No
+			case "right", "l":
+				m.deleteNoteConfirmIdx = 1 // Yes
+			case "enter":
+				if m.deleteNoteConfirmIdx == 1 { // Yes selected
+					// Delete the note
+					if len(m.notes) > 0 && m.currentNoteIdx < len(m.notes) {
+						m.notes = append(m.notes[:m.currentNoteIdx], m.notes[m.currentNoteIdx+1:]...)
+						// Adjust currentNoteIdx if necessary
+						if m.currentNoteIdx >= len(m.notes) && len(m.notes) > 0 {
+							m.currentNoteIdx = len(m.notes) - 1
+						}
+						if len(m.notes) == 0 {
+							m.currentNoteIdx = 0
+						}
+					}
+				}
+				m.showDeleteNoteDialog = false
+				m.deleteNoteConfirmIdx = 0
+			}
+			return m, nil
+		}
 		switch msg.String() {
 		case "ctrl+c", "q":
 			return m, tea.Quit
@@ -307,6 +339,27 @@ func (m UiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					if m.currentNoteIdx > 0 {
 						m.currentNoteIdx--
 					}
+				case "d":
+					// Delete current note
+					if len(m.notes) > 0 && m.currentNoteIdx < len(m.notes) {
+						// Check if confirmation is required
+						confirmDelete := os.Getenv("CONFIRM_NOTES_DELETE")
+						if confirmDelete == "true" {
+							// Show confirmation dialog
+							m.showDeleteNoteDialog = true
+							m.deleteNoteConfirmIdx = 0 // Default to "No"
+						} else {
+							// Delete immediately without confirmation
+							m.notes = append(m.notes[:m.currentNoteIdx], m.notes[m.currentNoteIdx+1:]...)
+							// Adjust currentNoteIdx if necessary
+							if m.currentNoteIdx >= len(m.notes) && len(m.notes) > 0 {
+								m.currentNoteIdx = len(m.notes) - 1
+							}
+							if len(m.notes) == 0 {
+								m.currentNoteIdx = 0
+							}
+						}
+					}
 				}
 			}
 		}
@@ -326,6 +379,9 @@ func (m UiModel) View() string {
 	}
 	if m.showLinksDialog {
 		return m.renderWithDialog(m.renderLinksDialog())
+	}
+	if m.showDeleteNoteDialog {
+		return m.renderWithDialog(m.renderDeleteNoteDialog())
 	}
 
 	return m.renderMainContent()
@@ -646,6 +702,68 @@ func (m UiModel) renderLinksDialog() string {
 	dialog := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
 		BorderForeground(lipgloss.Color("63")).
+		Padding(1).
+		Background(lipgloss.Color("235")).
+		Render(dialogContent)
+
+	return dialog
+}
+
+func (m UiModel) renderDeleteNoteDialog() string {
+	dialogWidth := 50
+
+	title := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("15")).
+		Align(lipgloss.Center).
+		Padding(0, 0).
+		Width(dialogWidth - 4).
+		Bold(true).
+		Render("¿Estás seguro de eliminar esta Nota?")
+
+	// Buttons: No and Yes
+	noButton := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("15")).
+		Padding(0, 3).
+		Margin(0, 2)
+	yesButton := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("15")).
+		Padding(0, 3).
+		Margin(0, 2)
+
+	if m.deleteNoteConfirmIdx == 0 {
+		// No is selected
+		noButton = noButton.
+			Background(lipgloss.Color("160")). // Red
+			Bold(true)
+		yesButton = yesButton.
+			Background(lipgloss.Color("240")) // Gray
+	} else {
+		// Yes is selected
+		noButton = noButton.
+			Background(lipgloss.Color("240")) // Gray
+		yesButton = yesButton.
+			Background(lipgloss.Color("28")). // Green
+			Bold(true)
+	}
+
+	buttons := lipgloss.JoinHorizontal(
+		lipgloss.Center,
+		noButton.Render("No"),
+		yesButton.Render("Sí"),
+	)
+
+	hint := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("244")).
+		Align(lipgloss.Center).
+		Width(dialogWidth - 4).
+		Render("← → para navegar | Enter para confirmar | Esc para cancelar")
+
+	dialogContent := lipgloss.JoinVertical(lipgloss.Center, title, "", buttons, "", hint)
+
+	dialog := lipgloss.NewStyle().
+		Width(dialogWidth).
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(lipgloss.Color("196")). // Red border
 		Padding(1).
 		Background(lipgloss.Color("235")).
 		Render(dialogContent)
