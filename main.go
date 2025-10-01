@@ -12,27 +12,27 @@ import (
 )
 
 type model struct {
-	lines         []string
-	currentLine   int
+	lines          []string
+	currentLine    int
 	currentWordIdx int
-	selectedWord  string
-	currentTab    int
-	tabs          []string
-	width, height int
-	filePath      string
-	showDialog    bool
-	lineInput     string
+	selectedWord   string
+	currentTab     int
+	tabs           []string
+	width, height  int
+	filePath       string
+	showDialog     bool
+	lineInput      string
 }
 
 func initialModel() model {
 	m := model{
-		tabs:          []string{"Texto", "Vocabulario", "Referencias"},
-		currentTab:    0,
-		currentLine:   0,
+		tabs:           []string{"Texto", "Vocabulario", "Referencias"},
+		currentTab:     0,
+		currentLine:    0,
 		currentWordIdx: 0,
-		selectedWord:  "",
-		showDialog:    false,
-		lineInput:     "",
+		selectedWord:   "",
+		showDialog:     false,
+		lineInput:      "",
 	}
 
 	if len(os.Args) > 1 {
@@ -177,27 +177,36 @@ func (m model) View() string {
 		if i == m.currentTab {
 			tabViews = append(tabViews, lipgloss.NewStyle().
 				Bold(true).
-				Foreground(lipgloss.Color("blue")).
-				Margin(0, 2, 0, 0).
+				Foreground(lipgloss.Color("15")). // Bright white
+				Background(lipgloss.Color("27")). // Blue background
+				Border(lipgloss.RoundedBorder(), true).
+				BorderForeground(lipgloss.Color("51")). // Cyan border
+				Padding(0, 2).
+				Margin(0, 1, 0, 0).
 				Render(tab))
 		} else {
 			tabViews = append(tabViews, lipgloss.NewStyle().
 				Italic(true).
-				Margin(0, 2, 0, 0).
+				Foreground(lipgloss.Color("250")). // Light gray
+				Background(lipgloss.Color("237")). // Dark gray background
+				Border(lipgloss.NormalBorder(), true).
+				BorderForeground(lipgloss.Color("244")). // Medium gray border
+				Padding(0, 2).
+				Margin(0, 1, 0, 0).
 				Render(tab))
 		}
 	}
 	tabBar := lipgloss.JoinHorizontal(lipgloss.Left, tabViews...)
 	tabBar = lipgloss.NewStyle().
 		Padding(0, 1).
-		Height(1).
+		Height(3). // Increased height to accommodate borders
 		Border(lipgloss.NormalBorder(), false, false, true, false).
-		Foreground(lipgloss.Color("gray")).
+		Foreground(lipgloss.Color("244")). // Medium gray for border
 		Render(tabBar)
 	b.WriteString(tabBar + "\n")
 
 	// Content area
-	contentHeight := m.height - 3 // 1 for tabs, 1 for status, 1 for margins
+	contentHeight := m.height - 4 // Adjusted for increased tab bar height (3) + status (1)
 	if contentHeight < 1 {
 		contentHeight = 1
 	}
@@ -208,15 +217,16 @@ func (m model) View() string {
 		viewEnd := min(len(m.lines), viewStart+contentHeight)
 		for i := viewStart; i < viewEnd; i++ {
 			if i == m.currentLine {
-				// Highlight current word
+				// Highlight current line and word
 				line := m.lines[i]
 				words := strings.Fields(line)
 				var highlightedWords []string
 				for j, word := range words {
 					if j == m.currentWordIdx && len(words) > 0 {
 						highlightedWords = append(highlightedWords, lipgloss.NewStyle().
-							Background(lipgloss.Color("yellow")).
-							Foreground(lipgloss.Color("black")).
+							Bold(true).
+							Background(lipgloss.Color("226")). // Bright yellow
+							Foreground(lipgloss.Color("232")). // Dark gray
 							Padding(0, 1).
 							Render(word))
 					} else {
@@ -224,9 +234,17 @@ func (m model) View() string {
 					}
 				}
 				hlLine := strings.Join(highlightedWords, " ")
+				// Apply line highlight
+				hlLine = lipgloss.NewStyle().
+					Background(lipgloss.Color("236")). // Darker gray background
+					Foreground(lipgloss.Color("15")). // Bright white text
+					Padding(0, 1).
+					Render(hlLine)
 				b.WriteString(hlLine + "\n")
 			} else {
-				b.WriteString(m.lines[i] + "\n")
+				b.WriteString(lipgloss.NewStyle().
+					Foreground(lipgloss.Color("252")). // Light gray for non-current lines
+					Render(m.lines[i]) + "\n")
 			}
 		}
 	} else if m.currentTab == 1 {
@@ -247,7 +265,7 @@ func (m model) View() string {
 			Width(dialogWidth).
 			Height(dialogHeight).
 			Border(lipgloss.RoundedBorder()).
-			BorderForeground(lipgloss.Color("63")).
+			BorderForeground(lipgloss.Color("63")). // Purple border
 			Padding(1, 2).
 			Align(lipgloss.Center).
 			Render(fmt.Sprintf("Go to line: %s", m.lineInput))
@@ -279,9 +297,11 @@ func (m model) View() string {
 		Padding(0, 1).
 		Height(1).
 		Bold(true).
-		Foreground(lipgloss.Color("240")).
-		Background(lipgloss.Color("black"))
-	b.WriteString(lipgloss.NewStyle().Align(lipgloss.Left).Render(statusStyle.Render(status)))
+		Foreground(lipgloss.Color("15")). // Bright white
+		Background(lipgloss.Color("234")). // Very dark gray
+		Width(m.width).
+		Align(lipgloss.Left)
+	b.WriteString(statusStyle.Render(status))
 
 	return lipgloss.NewStyle().Width(m.width).Height(m.height).Render(b.String())
 }
