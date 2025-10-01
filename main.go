@@ -29,12 +29,17 @@ type model struct {
 	tabWidths       []int // Store rendered width of each tab
 	vocabulary      []string
 	currentVocabIdx int // Track selected vocabulary word
+	notes           []string
+	currentNoteIdx  int // Track selected note
+	showNoteDialog  bool
+	noteInput       []string // Multiline note input
 }
 
 type progressEntry struct {
 	FileName   string   `json:"file_name"`
 	Line       int      `json:"line"`
 	Vocabulary []string `json:"vocabulary"`
+	Notes      []string `json:"notes"`
 }
 
 type progressMap map[string]progressEntry
@@ -44,34 +49,34 @@ func hashPath(path string) string {
 	return hex.EncodeToString(h[:])
 }
 
-func loadProgress(filePath string) (int, []string, error) {
+func loadProgress(filePath string) (int, []string, []string, error) {
 	homeDir, err := os.UserHomeDir()
 	if err != nil {
-		return 0, nil, fmt.Errorf("error getting home directory: %v", err)
+		return 0, nil, nil, fmt.Errorf("error getting home directory: %v", err)
 	}
 	progressPath := filepath.Join(homeDir, "ltbr", "progress.json")
 
 	data, err := os.ReadFile(progressPath)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return 0, nil, nil // No progress file exists, return default values
+			return 0, nil, nil, nil // No progress file exists, return default values
 		}
-		return 0, nil, fmt.Errorf("error reading progress file: %v", err)
+		return 0, nil, nil, fmt.Errorf("error reading progress file: %v", err)
 	}
 
 	var progress progressMap
 	if err := json.Unmarshal(data, &progress); err != nil {
-		return 0, nil, fmt.Errorf("error parsing progress file: %v", err)
+		return 0, nil, nil, fmt.Errorf("error parsing progress file: %v", err)
 	}
 
 	hash := hashPath(filePath)
 	if entry, exists := progress[hash]; exists {
-		return entry.Line, entry.Vocabulary, nil
+		return entry.Line, entry.Vocabulary, entry.Notes, nil
 	}
-	return 0, nil, nil // No entry for this file
+	return 0, nil, nil, nil // No entry for this file
 }
 
-func saveProgress(filePath string, line int, vocabulary []string) error {
+func saveProgress(filePath string, line int, vocabulary, notes []string) error {
 	homeDir, err := os.UserHomeDir()
 	if err != nil {
 		return fmt.Errorf("error getting home directory: %v", err)
@@ -104,6 +109,7 @@ func saveProgress(filePath string, line int, vocabulary []string) error {
 		FileName:   filePath,
 		Line:       line,
 		Vocabulary: vocabulary,
+		Notes:      notes,
 	}
 
 	// Write back to file
@@ -119,16 +125,20 @@ func saveProgress(filePath string, line int, vocabulary []string) error {
 
 func initialModel() model {
 	m := model{
-		tabs:            []string{"Texto", "Vocabulario", "Referencias"},
+		tabs:            []string{"Texto", "Vocabulario", "Notas"},
 		currentTab:      0,
 		currentLine:     0,
 		currentWordIdx:  0,
 		currentVocabIdx: 0,
+		currentNoteIdx:  0,
 		selectedWord:    "",
 		showDialog:      false,
 		lineInput:       "",
 		tabWidths:       make([]int, 3), // Initialize for 3 tabs
 		vocabulary:      []string{},
+		notes:           []string{},
+		showNoteDialog:  false,
+		noteInput:       []string{""},
 	}
 
 	if len(os.Args) > 1 {
@@ -148,7 +158,7 @@ func initialModel() model {
 			os.Exit(1)
 		}
 		// Load progress for the file
-		line, vocab, err := loadProgress(m.filePath)
+		line, vocab, notes, err := loadProgress(m.filePath)
 		if err != nil {
 			fmt.Printf("Error loading progress: %v\n", err)
 			os.Exit(1)
@@ -157,6 +167,7 @@ func initialModel() model {
 			m.currentLine = line
 		}
 		m.vocabulary = vocab
+		m.notes = notes
 	} else {
 		// Sample lines for testing
 		sampleLines := []string{
@@ -207,12 +218,47 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return m, nil
 		}
+		if m.showNoteDialog {
+			switch msg.String() {
+			case "esc":
+				m.showNoteDialog = false
+				m.noteInput = []string{""} // Reset note input
+			case "enter":
+				// Add new line to note input
+				m.noteInput = append(m.noteInput, "")
+			case "backspace":
+				currentLine := len(m.noteInput) - 1
+				if len(m.noteInput[currentLine]) > 0 {
+					m.noteInput[currentLine] = m.noteInput[currentLine][:len(m.noteInput[currentLine])-1]
+				} else if currentLine > 0 {
+					m.noteInput = m.noteInput[:currentLine]
+				}
+			case "ctrl+s":
+				// Save note
+				note := strings.Join(m.noteInput, "\n")
+				if note != "" {
+					m.notes = append(m.notes, note)
+				}
+				m.showNoteDialog = false
+				m.noteInput = []string{""} // Reset note input
+			case "ctrl+c":
+				// Cancel note
+				m.showNoteDialog = false
+				m.noteInput = []string{""} // Reset note input
+			default:
+				if len(msg.String()) == 1 {
+					currentLine := len(m.noteInput) - 1
+					m.noteInput[currentLine] += msg.String()
+				}
+			}
+			return m, nil
+		}
 		switch msg.String() {
-		case "ctrl+c", "q", "esc":
+		case "ctrl+c", "q":
 			return m, tea.Quit
 		case "s":
 			if m.filePath != "" {
-				if err := saveProgress(m.filePath, m.currentLine, m.vocabulary); err != nil {
+				if err := saveProgress(m.filePath, m.currentLine, m.vocabulary, m.notes); err != nil {
 					fmt.Printf("Error saving progress: %v\n", err)
 				}
 			}
@@ -223,6 +269,10 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.currentVocabIdx = 0 // Reset vocabulary index when switching to Vocabulario tab
 		case "3":
 			m.currentTab = 2
+			m.currentNoteIdx = 0 // Reset note index when switching to Notas tab
+		case "n":
+			m.showNoteDialog = true
+			m.noteInput = []string{""} // Initialize note input
 		case "g":
 			if m.currentTab == 0 {
 				m.showDialog = true
@@ -254,7 +304,6 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				case "w":
 					words := strings.Fields(m.lines[m.currentLine])
 					if len(words) > 0 && m.currentWordIdx < len(words) {
-						// ToDo: move this logic to a separate function
 						m.selectedWord = words[m.currentWordIdx]
 						// Add to vocabulary if not already present
 						found := false
@@ -280,10 +329,21 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						m.currentVocabIdx--
 					}
 				}
+			} else if m.currentTab == 2 {
+				switch msg.String() {
+				case "j":
+					if m.currentNoteIdx < len(m.notes)-1 {
+						m.currentNoteIdx++
+					}
+				case "k":
+					if m.currentNoteIdx > 0 {
+						m.currentNoteIdx--
+					}
+				}
 			}
 		}
 	case tea.MouseMsg:
-		if msg.Type == tea.MouseLeft && !m.showDialog {
+		if msg.Type == tea.MouseLeft && !m.showDialog && !m.showNoteDialog {
 			// Check if click is in tab bar (y <= 3, accounting for tab bar height)
 			if msg.Y <= 3 {
 				xPos := 0
@@ -292,6 +352,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						m.currentTab = i
 						if i == 1 {
 							m.currentVocabIdx = 0 // Reset vocabulary index when switching to Vocabulario tab
+						}
+						if i == 2 {
+							m.currentNoteIdx = 0 // Reset note index when switching to Notas tab
 						}
 						break
 					}
@@ -425,9 +488,35 @@ func (m model) View() string {
 			}
 		}
 	} else if m.currentTab == 2 {
-		// Referencias: placeholder
-		placeholder := "Contenido de Referencias (por determinarse).\n"
-		b.WriteString(strings.Repeat(placeholder, contentHeight))
+		// Notas tab: show notes with navigation
+		if len(m.notes) == 0 {
+			b.WriteString(lipgloss.NewStyle().
+				Foreground(lipgloss.Color("252")).
+				Render("No hay notas guardadas.\n"))
+		} else {
+			viewStart := max(0, m.currentNoteIdx-contentHeight/2)
+			viewEnd := min(len(m.notes), viewStart+contentHeight)
+			for i := viewStart; i < viewEnd; i++ {
+				// Split note into lines and limit to contentHeight
+				lines := strings.Split(m.notes[i], "\n")
+				noteLines := lines
+				if len(lines) > contentHeight {
+					noteLines = lines[:contentHeight]
+				}
+				noteText := strings.Join(noteLines, "\n")
+				if i == m.currentNoteIdx {
+					b.WriteString(lipgloss.NewStyle().
+						Background(lipgloss.Color("236")). // Darker gray background
+						Foreground(lipgloss.Color("15")). // Bright white text
+						Padding(0, 1).
+						Render(noteText) + "\n")
+				} else {
+					b.WriteString(lipgloss.NewStyle().
+						Foreground(lipgloss.Color("252")). // Light gray
+						Render(noteText) + "\n")
+				}
+			}
+		}
 	}
 
 	// Dialog for line input
@@ -454,6 +543,60 @@ func (m model) View() string {
 		b.WriteString("\n" + dialog)
 	}
 
+	// Dialog for note input
+	if m.showNoteDialog {
+		dialogWidth := m.width * 3 / 4
+		dialogHeight := m.height / 2
+		if dialogWidth > 80 {
+			dialogWidth = 80
+		}
+		if dialogHeight < 10 {
+			dialogHeight = 10
+		}
+		// Render note input
+		noteText := strings.Join(m.noteInput, "\n")
+		inputBox := lipgloss.NewStyle().
+			Width(dialogWidth - 4).
+			Height(dialogHeight - 6).
+			Border(lipgloss.NormalBorder()).
+			BorderForeground(lipgloss.Color("63")). // Purple border
+			Padding(1).
+			Render(noteText)
+		// Render buttons
+		saveButton := lipgloss.NewStyle().
+			Foreground(lipgloss.Color("15")). // Bright white
+			Background(lipgloss.Color("28")). // Green background
+			Padding(0, 2).
+			Margin(0, 1).
+			Render("Guardar (Ctrl+S)")
+		cancelButton := lipgloss.NewStyle().
+			Foreground(lipgloss.Color("15")). // Bright white
+			Background(lipgloss.Color("160")). // Red background
+			Padding(0, 2).
+			Margin(0, 1).
+			Render("Cancelar (Ctrl+C)")
+		buttons := lipgloss.JoinHorizontal(lipgloss.Center, saveButton, cancelButton)
+		dialogContent := lipgloss.JoinVertical(lipgloss.Left, inputBox, buttons)
+		dialog := lipgloss.NewStyle().
+			Width(dialogWidth).
+			Height(dialogHeight).
+			Border(lipgloss.RoundedBorder()).
+			BorderForeground(lipgloss.Color("63")). // Purple border
+			Padding(1).
+			Align(lipgloss.Center).
+			Render(dialogContent)
+		dialog = lipgloss.Place(
+			m.width,
+			m.height-2, // Account for status bar
+			lipgloss.Center,
+			lipgloss.Center,
+			dialog,
+			lipgloss.WithWhitespaceBackground(lipgloss.Color("235")),
+			lipgloss.WithWhitespaceForeground(lipgloss.Color("63")),
+		)
+		b.WriteString("\n" + dialog)
+	}
+
 	// Status bar
 	total := len(m.lines)
 	percent := float64(0)
@@ -466,6 +609,8 @@ func (m model) View() string {
 		selInfo = fmt.Sprintf(" | Seleccionada: %s", m.selectedWord)
 	} else if m.currentTab == 1 && len(m.vocabulary) > 0 {
 		selInfo = fmt.Sprintf(" | Palabra: %s", m.vocabulary[m.currentVocabIdx])
+	} else if m.currentTab == 2 && len(m.notes) > 0 {
+		selInfo = fmt.Sprintf(" | Nota: %d/%d", m.currentNoteIdx+1, len(m.notes))
 	}
 	status := lineInfo + selInfo
 	statusStyle := lipgloss.NewStyle().
