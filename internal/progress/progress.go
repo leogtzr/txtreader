@@ -9,7 +9,7 @@ import (
 	"txtreader/internal/utils"
 )
 
-func SaveProgress(filePath string, line int, vocabulary, notes []string) error {
+func Save(filePath string, line int, vocabulary, notes []string) error {
 	homeDir, err := os.UserHomeDir()
 	if err != nil {
 		return fmt.Errorf("error getting home directory: %v", err)
@@ -54,4 +54,31 @@ func SaveProgress(filePath string, line int, vocabulary, notes []string) error {
 		return fmt.Errorf("error writing progress file: %v", err)
 	}
 	return nil
+}
+
+func Load(filePath string) (int, []string, []string, error) {
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		return 0, nil, nil, fmt.Errorf("error getting home directory: %v", err)
+	}
+	progressPath := filepath.Join(homeDir, "ltbr", "progress.json")
+
+	data, err := os.ReadFile(progressPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return 0, nil, nil, nil // No textProgress file exists, return default values
+		}
+		return 0, nil, nil, fmt.Errorf("error reading textProgress file: %v", err)
+	}
+
+	var textProgress model.ProgressMap
+	if err := json.Unmarshal(data, &textProgress); err != nil {
+		return 0, nil, nil, fmt.Errorf("error parsing textProgress file: %v", err)
+	}
+
+	hash := utils.HashPath(filePath)
+	if entry, exists := textProgress[hash]; exists {
+		return entry.Line, entry.Vocabulary, entry.Notes, nil
+	}
+	return 0, nil, nil, nil // No entry for this file
 }
