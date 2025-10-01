@@ -8,31 +8,38 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 
+	"os/exec"
+
+	"github.com/atotto/clipboard"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 )
 
 type model struct {
-	lines           []string
-	currentLine     int
-	currentWordIdx  int
-	selectedWord    string
-	currentTab      int
-	tabs            []string
-	width, height   int
-	filePath        string
-	showDialog      bool
-	lineInput       string
-	tabWidths       []int // Store rendered width of each tab
-	vocabulary      []string
-	currentVocabIdx int // Track selected vocabulary word
-	notes           []string
-	currentNoteIdx  int // Track selected note
-	showNoteDialog  bool
-	noteInput       []string // Multiline note input
+	lines                 []string
+	currentLine           int
+	currentWordIdx        int
+	selectedWord          string
+	copiedToClipboardWord string
+	currentTab            int
+	tabs                  []string
+	width, height         int
+	filePath              string
+	showDialog            bool
+	lineInput             string
+	tabWidths             []int // Store rendered width of each tab
+	vocabulary            []string
+	currentVocabIdx       int // Track selected vocabulary word
+	notes                 []string
+	currentNoteIdx        int // Track selected note
+	showNoteDialog        bool
+	noteInput             []string // Multiline note input
+	showLinksDialog       bool     // Track links widget visibility
+	currentLinkIdx        int      // Track selected link
 }
 
 type progressEntry struct {
@@ -131,6 +138,7 @@ func initialModel() model {
 		currentWordIdx:  0,
 		currentVocabIdx: 0,
 		currentNoteIdx:  0,
+		currentLinkIdx:  0,
 		selectedWord:    "",
 		showDialog:      false,
 		lineInput:       "",
@@ -139,6 +147,7 @@ func initialModel() model {
 		notes:           []string{},
 		showNoteDialog:  false,
 		noteInput:       []string{""},
+		showLinksDialog: false,
 	}
 
 	if len(os.Args) > 1 {
@@ -253,6 +262,46 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return m, nil
 		}
+		if m.showLinksDialog {
+			switch msg.String() {
+			case "esc":
+				m.showLinksDialog = false
+				m.currentLinkIdx = 0
+			case "j":
+				if m.currentLinkIdx < 1 { // Only two items: GoodReads, RAE
+					m.currentLinkIdx++
+				}
+			case "k":
+				if m.currentLinkIdx > 0 {
+					m.currentLinkIdx--
+				}
+			case "enter":
+				// Open the selected link in the default browser
+				links := []string{"https://www.goodreads.com/", "https://www.rae.es/"}
+				if m.currentLinkIdx >= 0 && m.currentLinkIdx < len(links) {
+					url := links[m.currentLinkIdx]
+					var cmd *exec.Cmd
+					switch runtime.GOOS {
+					case "windows":
+						cmd = exec.Command("cmd", "/c", "start", url)
+					case "darwin":
+						cmd = exec.Command("open", url)
+					default: // linux, bsd, etc.
+						cmd = exec.Command("xdg-open", url)
+					}
+					if err := cmd.Start(); err != nil {
+						fmt.Printf("Error opening browser: %v\n", err)
+					}
+				}
+				m.showLinksDialog = false
+				m.currentLinkIdx = 0
+			case "ctrl+c":
+				// Cancel the dialog
+				m.showLinksDialog = false
+				m.currentLinkIdx = 0
+			}
+			return m, nil
+		}
 		switch msg.String() {
 		case "ctrl+c", "q":
 			return m, tea.Quit
@@ -278,6 +327,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.showDialog = true
 				m.lineInput = ""
 			}
+		case "o":
+			m.showLinksDialog = true
+			m.currentLinkIdx = 0
 		default:
 			if m.currentTab == 0 {
 				switch msg.String() {
@@ -317,6 +369,15 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 							m.vocabulary = append(m.vocabulary, m.selectedWord)
 						}
 					}
+				case "c":
+					words := strings.Fields(m.lines[m.currentLine])
+					if len(words) > 0 && m.currentWordIdx < len(words) {
+						m.copiedToClipboardWord = words[m.currentWordIdx]
+						err := clipboard.WriteAll(m.copiedToClipboardWord)
+						if err != nil {
+							fmt.Printf("Error copying word: %v\n", err)
+						}
+					}
 				}
 			} else if m.currentTab == 1 {
 				switch msg.String() {
@@ -343,7 +404,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 	case tea.MouseMsg:
-		if msg.Type == tea.MouseLeft && !m.showDialog && !m.showNoteDialog {
+		if msg.Type == tea.MouseLeft && !m.showDialog && !m.showNoteDialog && !m.showLinksDialog {
 			// Check if click is in tab bar (y <= 3, accounting for tab bar height)
 			if msg.Y <= 3 {
 				xPos := 0
@@ -384,7 +445,23 @@ func max(a, b int) int {
 }
 
 func (m model) View() string {
-	var b strings.Builder
+	// Si hay un diálogo activo, renderizarlo encima de todo
+	if m.showDialog {
+		return m.renderWithDialog(m.renderGoToLineDialog())
+	}
+	if m.showNoteDialog {
+		return m.renderWithDialog(m.renderNoteDialog())
+	}
+	if m.showLinksDialog {
+		return m.renderWithDialog(m.renderLinksDialog())
+	}
+
+	// Renderizar contenido normal
+	return m.renderMainContent()
+}
+
+func (m model) renderMainContent() string {
+	var content strings.Builder
 
 	// Tab bar
 	var tabViews []string
@@ -419,7 +496,7 @@ func (m model) View() string {
 		Border(lipgloss.NormalBorder(), false, false, true, false).
 		Foreground(lipgloss.Color("244")). // Medium gray for border
 		Render(tabBar)
-	b.WriteString(tabBar + "\n")
+	content.WriteString(tabBar + "\n")
 
 	// Content area
 	contentHeight := m.height - 4 // Adjusted for tab bar height (3) + status (1)
@@ -456,9 +533,9 @@ func (m model) View() string {
 					Foreground(lipgloss.Color("15")). // Bright white text
 					Padding(0, 1).
 					Render(hlLine)
-				b.WriteString(hlLine + "\n")
+				content.WriteString(hlLine + "\n")
 			} else {
-				b.WriteString(lipgloss.NewStyle().
+				content.WriteString(lipgloss.NewStyle().
 					Foreground(lipgloss.Color("252")). // Light gray for non-current lines
 					Render(m.lines[i]) + "\n")
 			}
@@ -466,7 +543,7 @@ func (m model) View() string {
 	} else if m.currentTab == 1 {
 		// Vocabulario tab: show vocabulary words with navigation
 		if len(m.vocabulary) == 0 {
-			b.WriteString(lipgloss.NewStyle().
+			content.WriteString(lipgloss.NewStyle().
 				Foreground(lipgloss.Color("252")).
 				Render("No hay palabras en el vocabulario.\n"))
 		} else {
@@ -475,13 +552,13 @@ func (m model) View() string {
 			for i := viewStart; i < viewEnd; i++ {
 				word := m.vocabulary[i]
 				if i == m.currentVocabIdx {
-					b.WriteString(lipgloss.NewStyle().
+					content.WriteString(lipgloss.NewStyle().
 						Background(lipgloss.Color("236")). // Darker gray background
 						Foreground(lipgloss.Color("15")). // Bright white text
 						Padding(0, 1).
 						Render(word) + "\n")
 				} else {
-					b.WriteString(lipgloss.NewStyle().
+					content.WriteString(lipgloss.NewStyle().
 						Foreground(lipgloss.Color("252")). // Light gray
 						Render(word) + "\n")
 				}
@@ -490,7 +567,7 @@ func (m model) View() string {
 	} else if m.currentTab == 2 {
 		// Notas tab: show notes with navigation and borders
 		if len(m.notes) == 0 {
-			b.WriteString(lipgloss.NewStyle().
+			content.WriteString(lipgloss.NewStyle().
 				Foreground(lipgloss.Color("252")).
 				Render("No hay notas guardadas.\n"))
 		} else {
@@ -542,86 +619,8 @@ func (m model) View() string {
 				usedHeight += noteHeight + 2 // Add border height
 			}
 			// Join notes vertically with a newline separator
-			b.WriteString(lipgloss.JoinVertical(lipgloss.Left, renderedNotes...) + "\n")
+			content.WriteString(lipgloss.JoinVertical(lipgloss.Left, renderedNotes...) + "\n")
 		}
-	}
-
-	// Dialog for line input
-	if m.showDialog {
-		dialogWidth := 30
-		dialogHeight := 3
-		dialog := lipgloss.NewStyle().
-			Width(dialogWidth).
-			Height(dialogHeight).
-			Border(lipgloss.RoundedBorder()).
-			BorderForeground(lipgloss.Color("63")). // Purple border
-			Padding(1, 2).
-			Align(lipgloss.Center).
-			Render(fmt.Sprintf("Go to line: %s", m.lineInput))
-		dialog = lipgloss.Place(
-			m.width,
-			m.height-2, // Account for status bar
-			lipgloss.Center,
-			lipgloss.Center,
-			dialog,
-			lipgloss.WithWhitespaceBackground(lipgloss.Color("235")),
-			lipgloss.WithWhitespaceForeground(lipgloss.Color("63")),
-		)
-		b.WriteString("\n" + dialog)
-	}
-
-	// Dialog for note input
-	if m.showNoteDialog {
-		dialogWidth := m.width * 3 / 4
-		dialogHeight := m.height / 2
-		if dialogWidth > 80 {
-			dialogWidth = 80
-		}
-		if dialogHeight < 10 {
-			dialogHeight = 10
-		}
-		// Render note input
-		noteText := strings.Join(m.noteInput, "\n")
-		inputBox := lipgloss.NewStyle().
-			Width(dialogWidth - 4).
-			Height(dialogHeight - 6).
-			Border(lipgloss.NormalBorder()).
-			BorderForeground(lipgloss.Color("63")). // Purple border
-			Padding(1).
-			Render(noteText)
-		// Render buttons
-		saveButton := lipgloss.NewStyle().
-			Foreground(lipgloss.Color("15")). // Bright white
-			Background(lipgloss.Color("28")). // Green background
-			Padding(0, 2).
-			Margin(0, 1).
-			Render("Guardar (Ctrl+S)")
-		cancelButton := lipgloss.NewStyle().
-			Foreground(lipgloss.Color("15")). // Bright white
-			Background(lipgloss.Color("160")). // Red background
-			Padding(0, 2).
-			Margin(0, 1).
-			Render("Cancelar (Ctrl+C)")
-		buttons := lipgloss.JoinHorizontal(lipgloss.Center, saveButton, cancelButton)
-		dialogContent := lipgloss.JoinVertical(lipgloss.Left, inputBox, buttons)
-		dialog := lipgloss.NewStyle().
-			Width(dialogWidth).
-			Height(dialogHeight).
-			Border(lipgloss.RoundedBorder()).
-			BorderForeground(lipgloss.Color("63")). // Purple border
-			Padding(1).
-			Align(lipgloss.Center).
-			Render(dialogContent)
-		dialog = lipgloss.Place(
-			m.width,
-			m.height-2, // Account for status bar
-			lipgloss.Center,
-			lipgloss.Center,
-			dialog,
-			lipgloss.WithWhitespaceBackground(lipgloss.Color("235")),
-			lipgloss.WithWhitespaceForeground(lipgloss.Color("63")),
-		)
-		b.WriteString("\n" + dialog)
 	}
 
 	// Status bar
@@ -634,6 +633,8 @@ func (m model) View() string {
 	selInfo := ""
 	if m.currentTab == 0 && m.selectedWord != "" {
 		selInfo = fmt.Sprintf(" | Seleccionada: %s", m.selectedWord)
+	} else if m.currentTab == 0 && m.copiedToClipboardWord != "" {
+		selInfo += fmt.Sprintf(" | Copiada al portapapeles: %s", m.copiedToClipboardWord)
 	} else if m.currentTab == 1 && len(m.vocabulary) > 0 {
 		selInfo = fmt.Sprintf(" | Palabra: %s", m.vocabulary[m.currentVocabIdx])
 	} else if m.currentTab == 2 && len(m.notes) > 0 {
@@ -648,9 +649,213 @@ func (m model) View() string {
 		Background(lipgloss.Color("234")). // Very dark gray
 		Width(m.width).
 		Align(lipgloss.Left)
-	b.WriteString(statusStyle.Render(status))
+	content.WriteString(statusStyle.Render(status))
 
-	return lipgloss.NewStyle().Width(m.width).Height(m.height).Render(b.String())
+	return content.String()
+}
+
+func (m model) renderGoToLineDialog() string {
+	dialogContent := fmt.Sprintf("Go to line: %s", m.lineInput)
+
+	dialog := lipgloss.NewStyle().
+		Width(30).
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(lipgloss.Color("63")).
+		Padding(1, 2).
+		Align(lipgloss.Center).
+		Background(lipgloss.Color("235")).
+		Render(dialogContent)
+
+	return dialog
+}
+
+func (m model) renderNoteDialog() string {
+	dialogWidth := min(m.width*3/4, m.width-4)
+	if dialogWidth > 80 {
+		dialogWidth = 80
+	}
+
+	title := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("15")).
+		Align(lipgloss.Center).
+		Padding(0, 0).
+		Width(dialogWidth - 4).
+		Render("Agregar nota")
+
+	noteText := strings.Join(m.noteInput, "\n")
+	inputBox := lipgloss.NewStyle().
+		Width(dialogWidth - 4).
+		Height(10).
+		Border(lipgloss.NormalBorder()).
+		BorderForeground(lipgloss.Color("63")).
+		Padding(1).
+		Render(noteText)
+
+	saveButton := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("15")).
+		Background(lipgloss.Color("28")).
+		Padding(0, 2).
+		Margin(0, 1).
+		Render("Guardar (Ctrl+S)")
+
+	cancelButton := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("15")).
+		Background(lipgloss.Color("160")).
+		Padding(0, 2).
+		Margin(0, 1).
+		Render("Cancelar (Ctrl+C)")
+
+	buttons := lipgloss.JoinHorizontal(lipgloss.Center, saveButton, cancelButton)
+	dialogContent := lipgloss.JoinVertical(lipgloss.Left, title, inputBox, buttons)
+
+	dialog := lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(lipgloss.Color("63")).
+		Padding(1).
+		Background(lipgloss.Color("235")).
+		Render(dialogContent)
+
+	return dialog
+}
+
+func (m model) renderLinksDialog() string {
+	dialogWidth := 40
+
+	title := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("15")).
+		Align(lipgloss.Center).
+		Padding(0, 0).
+		Width(dialogWidth - 4).
+		Render("Seleccionar Enlace")
+
+	links := []string{"GoodReads", "Real Academia Española"}
+	var linkItems []string
+	for i, link := range links {
+		style := lipgloss.NewStyle().
+			Width(dialogWidth-6).
+			Padding(0, 1).
+			Align(lipgloss.Left)
+		if i == m.currentLinkIdx {
+			style = style.
+				Background(lipgloss.Color("236")).
+				Foreground(lipgloss.Color("15"))
+		} else {
+			style = style.
+				Foreground(lipgloss.Color("252"))
+		}
+		linkItems = append(linkItems, style.Render(link))
+	}
+	linksList := lipgloss.JoinVertical(lipgloss.Left, linkItems...)
+
+	listBox := lipgloss.NewStyle().
+		Width(dialogWidth-4).
+		Border(lipgloss.NormalBorder()).
+		BorderForeground(lipgloss.Color("63")).
+		Padding(0, 1).
+		Render(linksList)
+
+	goButton := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("15")).
+		Background(lipgloss.Color("28")).
+		Padding(0, 2).
+		Margin(0, 1).
+		Render("Ir A (Enter)")
+
+	cancelButton := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("15")).
+		Background(lipgloss.Color("160")).
+		Padding(0, 2).
+		Margin(0, 1).
+		Render("Cancelar (Ctrl+C)")
+
+	buttons := lipgloss.JoinHorizontal(lipgloss.Center, goButton, cancelButton)
+	dialogContent := lipgloss.JoinVertical(lipgloss.Left, title, listBox, buttons)
+
+	dialog := lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(lipgloss.Color("63")).
+		Padding(1).
+		Background(lipgloss.Color("235")).
+		Render(dialogContent)
+
+	return dialog
+}
+
+//func (m model) renderWithDialog(dialog string) string {
+//	// Renderizar el contenido principal
+//	mainContent := m.renderMainContent()
+//
+//	// Usar lipgloss.Place para centrar el diálogo sobre el contenido
+//	overlay := lipgloss.Place(
+//		m.width,
+//		m.height,
+//		lipgloss.Center,
+//		lipgloss.Center,
+//		dialog,
+//		lipgloss.WithWhitespaceChars(" "),
+//		lipgloss.WithWhitespaceForeground(lipgloss.NoColor{}),
+//	)
+//
+//	// Dividir ambos en líneas
+//	mainLines := strings.Split(mainContent, "\n")
+//	overlayLines := strings.Split(overlay, "\n")
+//
+//	// Asegurar que ambos tengan la misma cantidad de líneas
+//	maxLines := max(len(mainLines), len(overlayLines))
+//	for len(mainLines) < maxLines {
+//		mainLines = append(mainLines, "")
+//	}
+//	for len(overlayLines) < maxLines {
+//		overlayLines = append(overlayLines, "")
+//	}
+//
+//	// Combinar línea por línea: si la línea del overlay tiene contenido (no espacios), usarla
+//	result := make([]string, maxLines)
+//	for i := 0; i < maxLines; i++ {
+//		overlayLine := overlayLines[i]
+//		// Si la línea del overlay tiene contenido visible (no solo espacios), usarla
+//		if strings.TrimSpace(overlayLine) != "" {
+//			result[i] = overlayLine
+//		} else {
+//			result[i] = mainLines[i]
+//		}
+//	}
+//
+//	return strings.Join(result, "\n")
+//}
+
+//func (m model) renderWithDialog(dialog string) string {
+//	// Renderizar el contenido principal
+//	mainContent := m.renderMainContent()
+//
+//	// Usar PlaceEmbedded en lugar de Place para centrar el diálogo
+//	overlay := lipgloss.PlaceEmbedded(
+//		m.width,
+//		m.height,
+//		lipgloss.Center,
+//		lipgloss.Center,
+//		dialog,
+//	)
+//
+//	// Ahora basta con juntar el overlay sobre el contenido principal
+//	// Overlay devuelve sólo el bloque del diálogo en su posición
+//	// y el resto se mantiene como estaba en mainContent.
+//
+//	return overlay + "\n" + mainContent
+//}
+
+func (m model) renderWithDialog(dialog string) string {
+	background := m.renderMainContent()
+	dialogCentered := lipgloss.Place(
+		m.width,
+		m.height,
+		lipgloss.Center,
+		lipgloss.Center,
+		dialog,
+	)
+	// Devuelve SOLO el diálogo, dejando que Bubbletea redibuje todo el frame
+	// así no "borra" texto lateral porque Place no pone relleno extra.
+	return background + "\n" + dialogCentered
 }
 
 func main() {
