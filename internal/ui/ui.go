@@ -283,6 +283,19 @@ func (m UiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					if m.currentVocabIdx > 0 {
 						m.currentVocabIdx--
 					}
+				case "d":
+					// Delete current vocabulary word
+					if len(m.vocabulary) > 0 && m.currentVocabIdx < len(m.vocabulary) {
+						// Remove the word at currentVocabIdx
+						m.vocabulary = append(m.vocabulary[:m.currentVocabIdx], m.vocabulary[m.currentVocabIdx+1:]...)
+						// Adjust currentVocabIdx if necessary
+						if m.currentVocabIdx >= len(m.vocabulary) && len(m.vocabulary) > 0 {
+							m.currentVocabIdx = len(m.vocabulary) - 1
+						}
+						if len(m.vocabulary) == 0 {
+							m.currentVocabIdx = 0
+						}
+					}
 				}
 			} else if m.currentTab == 2 {
 				switch msg.String() {
