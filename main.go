@@ -357,15 +357,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					words := strings.Fields(m.lines[m.currentLine])
 					if len(words) > 0 && m.currentWordIdx < len(words) {
 						m.selectedWord = words[m.currentWordIdx]
-						// Add to vocabulary if not already present
-						found := false
-						for _, v := range m.vocabulary {
-							if v == m.selectedWord {
-								found = true
-								break
-							}
-						}
-						if !found {
+						// Add to vocabulary if not already present:
+						wordAlreadyInVocab := wordExists(&m.vocabulary, m.selectedWord)
+						if !wordAlreadyInVocab {
 							m.vocabulary = append(m.vocabulary, m.selectedWord)
 						}
 					}
@@ -864,4 +858,16 @@ func main() {
 		fmt.Printf("fatal: %v\n", err)
 		os.Exit(1)
 	}
+}
+
+func wordExists(words *[]string, word string) bool {
+	found := false
+	for _, v := range *words {
+		if v == word {
+			found = true
+			break
+		}
+	}
+
+	return found
 }
