@@ -2,15 +2,18 @@ package main
 
 import (
 	"bufio"
-	"crypto/md5"
-	"encoding/hex"
 	"encoding/json"
+	"flag"
 	"fmt"
 	"os"
 	"path/filepath"
 	"runtime"
 	"strconv"
 	"strings"
+	"txtreader/internal/model"
+	"txtreader/internal/progress"
+	"txtreader/internal/text"
+	"txtreader/internal/utils"
 
 	"os/exec"
 
@@ -19,7 +22,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 )
 
-type model struct {
+type uiModel struct {
 	lines                 []string
 	currentLine           int
 	currentWordIdx        int
@@ -42,20 +45,6 @@ type model struct {
 	currentLinkIdx        int      // Track selected link
 }
 
-type progressEntry struct {
-	FileName   string   `json:"file_name"`
-	Line       int      `json:"line"`
-	Vocabulary []string `json:"vocabulary"`
-	Notes      []string `json:"notes"`
-}
-
-type progressMap map[string]progressEntry
-
-func hashPath(path string) string {
-	h := md5.Sum([]byte(path))
-	return hex.EncodeToString(h[:])
-}
-
 func loadProgress(filePath string) (int, []string, []string, error) {
 	homeDir, err := os.UserHomeDir()
 	if err != nil {
@@ -66,72 +55,25 @@ func loadProgress(filePath string) (int, []string, []string, error) {
 	data, err := os.ReadFile(progressPath)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return 0, nil, nil, nil // No progress file exists, return default values
+			return 0, nil, nil, nil // No textProgress file exists, return default values
 		}
-		return 0, nil, nil, fmt.Errorf("error reading progress file: %v", err)
+		return 0, nil, nil, fmt.Errorf("error reading textProgress file: %v", err)
 	}
 
-	var progress progressMap
-	if err := json.Unmarshal(data, &progress); err != nil {
-		return 0, nil, nil, fmt.Errorf("error parsing progress file: %v", err)
+	var textProgress model.ProgressMap
+	if err := json.Unmarshal(data, &textProgress); err != nil {
+		return 0, nil, nil, fmt.Errorf("error parsing textProgress file: %v", err)
 	}
 
-	hash := hashPath(filePath)
-	if entry, exists := progress[hash]; exists {
+	hash := utils.HashPath(filePath)
+	if entry, exists := textProgress[hash]; exists {
 		return entry.Line, entry.Vocabulary, entry.Notes, nil
 	}
 	return 0, nil, nil, nil // No entry for this file
 }
 
-func saveProgress(filePath string, line int, vocabulary, notes []string) error {
-	homeDir, err := os.UserHomeDir()
-	if err != nil {
-		return fmt.Errorf("error getting home directory: %v", err)
-	}
-	progressDir := filepath.Join(homeDir, "ltbr")
-	progressPath := filepath.Join(progressDir, "progress.json")
-
-	// Create directory if it doesn't exist
-	if err := os.MkdirAll(progressDir, 0755); err != nil {
-		return fmt.Errorf("error creating progress directory: %v", err)
-	}
-
-	// Read existing progress or create new
-	var progress progressMap
-	data, err := os.ReadFile(progressPath)
-	if err == nil {
-		if err := json.Unmarshal(data, &progress); err != nil {
-			return fmt.Errorf("error parsing progress file: %v", err)
-		}
-	} else if !os.IsNotExist(err) {
-		return fmt.Errorf("error reading progress file: %v", err)
-	}
-	if progress == nil {
-		progress = make(progressMap)
-	}
-
-	// Update progress entry
-	hash := hashPath(filePath)
-	progress[hash] = progressEntry{
-		FileName:   filePath,
-		Line:       line,
-		Vocabulary: vocabulary,
-		Notes:      notes,
-	}
-
-	// Write back to file
-	data, err = json.MarshalIndent(progress, "", "    ")
-	if err != nil {
-		return fmt.Errorf("error marshaling progress data: %v", err)
-	}
-	if err := os.WriteFile(progressPath, data, 0644); err != nil {
-		return fmt.Errorf("error writing progress file: %v", err)
-	}
-	return nil
-}
-
-func initialModel() model {
-	m := model{
+func initialModel(filePath string) uiModel {
+	m := uiModel{
 		tabs:            []string{"Texto", "Vocabulario", "Notas"},
 		currentTab:      0,
 		currentLine:     0,
@@ -150,56 +92,47 @@ func initialModel() model {
 		showLinksDialog: false,
 	}
 
-	if len(os.Args) > 1 {
-		m.filePath = os.Args[1]
-		file, err := os.Open(m.filePath)
-		if err != nil {
-			fmt.Printf("Error opening file: %v\n", err)
-			os.Exit(1)
-		}
-		defer file.Close()
-		scanner := bufio.NewScanner(file)
-		for scanner.Scan() {
-			m.lines = append(m.lines, scanner.Text())
-		}
-		if err := scanner.Err(); err != nil {
-			fmt.Printf("Error reading file: %v\n", err)
-			os.Exit(1)
-		}
-		// Load progress for the file
-		line, vocab, notes, err := loadProgress(m.filePath)
-		if err != nil {
-			fmt.Printf("Error loading progress: %v\n", err)
-			os.Exit(1)
-		}
-		if line > 0 && line < len(m.lines) {
-			m.currentLine = line
-		}
-		m.vocabulary = vocab
-		m.notes = notes
-	} else {
-		// Sample lines for testing
-		sampleLines := []string{
-			"Line 1: This is the first line with some words to navigate.",
-			"Line 2: Another line containing various words like hello world test.",
-			"Line 3: Third line for demonstration purposes only.",
-			"Line 4: More content to simulate a longer file.",
-			"Line 5: Fifth line with additional words.",
-		}
-		for i := 6; i <= 200; i++ {
-			sampleLines = append(sampleLines, fmt.Sprintf("Line %d: This is a sample line.", i))
-		}
-		m.lines = sampleLines
+	m.filePath = filePath
+	file, err := os.Open(m.filePath)
+	if err != nil {
+		fmt.Printf("Error opening file: %v\n", err)
+		os.Exit(1)
 	}
+	defer file.Close()
+	scanner := bufio.NewScanner(file)
+	for scanner.Scan() {
+		m.lines = append(m.lines, scanner.Text())
+	}
+	if err := scanner.Err(); err != nil {
+		fmt.Printf("Error reading file: %v\n", err)
+		os.Exit(1)
+	}
+	// Load progress for the file
+	line, vocab, notes, err := loadProgress(m.filePath)
+	if err != nil {
+		fmt.Printf("Error loading progress: %v\n", err)
+		os.Exit(1)
+	}
+	if line > 0 && line < len(m.lines) {
+		m.currentLine = line
+	}
+	if vocab == nil {
+		vocab = []string{}
+	}
+	if notes == nil {
+		notes = []string{}
+	}
+	m.vocabulary = vocab
+	m.notes = notes
 
 	return m
 }
 
-func (m model) Init() tea.Cmd {
+func (m uiModel) Init() tea.Cmd {
 	return nil
 }
 
-func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+func (m uiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
 		if m.showDialog {
@@ -307,7 +240,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, tea.Quit
 		case "s":
 			if m.filePath != "" {
-				if err := saveProgress(m.filePath, m.currentLine, m.vocabulary, m.notes); err != nil {
+				if err := progress.SaveProgress(m.filePath, m.currentLine, m.vocabulary, m.notes); err != nil {
 					fmt.Printf("Error saving progress: %v\n", err)
 				}
 			}
@@ -358,7 +291,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					if len(words) > 0 && m.currentWordIdx < len(words) {
 						m.selectedWord = words[m.currentWordIdx]
 						// Add to vocabulary if not already present:
-						wordAlreadyInVocab := wordExists(&m.vocabulary, m.selectedWord)
+						wordAlreadyInVocab := text.Contains(&m.vocabulary, m.selectedWord)
 						if !wordAlreadyInVocab {
 							m.vocabulary = append(m.vocabulary, m.selectedWord)
 						}
@@ -438,7 +371,7 @@ func max(a, b int) int {
 	return b
 }
 
-func (m model) View() string {
+func (m uiModel) View() string {
 	// Si hay un diálogo activo, renderizarlo encima de todo
 	if m.showDialog {
 		return m.renderWithDialog(m.renderGoToLineDialog())
@@ -454,7 +387,7 @@ func (m model) View() string {
 	return m.renderMainContent()
 }
 
-func (m model) renderMainContent() string {
+func (m uiModel) renderMainContent() string {
 	var content strings.Builder
 
 	// Tab bar
@@ -648,7 +581,7 @@ func (m model) renderMainContent() string {
 	return content.String()
 }
 
-func (m model) renderGoToLineDialog() string {
+func (m uiModel) renderGoToLineDialog() string {
 	dialogContent := fmt.Sprintf("Go to line: %s", m.lineInput)
 
 	dialog := lipgloss.NewStyle().
@@ -663,7 +596,7 @@ func (m model) renderGoToLineDialog() string {
 	return dialog
 }
 
-func (m model) renderNoteDialog() string {
+func (m uiModel) renderNoteDialog() string {
 	dialogWidth := min(m.width*3/4, m.width-4)
 	if dialogWidth > 80 {
 		dialogWidth = 80
@@ -712,7 +645,7 @@ func (m model) renderNoteDialog() string {
 	return dialog
 }
 
-func (m model) renderLinksDialog() string {
+func (m uiModel) renderLinksDialog() string {
 	dialogWidth := 40
 
 	title := lipgloss.NewStyle().
@@ -775,70 +708,7 @@ func (m model) renderLinksDialog() string {
 	return dialog
 }
 
-//func (m model) renderWithDialog(dialog string) string {
-//	// Renderizar el contenido principal
-//	mainContent := m.renderMainContent()
-//
-//	// Usar lipgloss.Place para centrar el diálogo sobre el contenido
-//	overlay := lipgloss.Place(
-//		m.width,
-//		m.height,
-//		lipgloss.Center,
-//		lipgloss.Center,
-//		dialog,
-//		lipgloss.WithWhitespaceChars(" "),
-//		lipgloss.WithWhitespaceForeground(lipgloss.NoColor{}),
-//	)
-//
-//	// Dividir ambos en líneas
-//	mainLines := strings.Split(mainContent, "\n")
-//	overlayLines := strings.Split(overlay, "\n")
-//
-//	// Asegurar que ambos tengan la misma cantidad de líneas
-//	maxLines := max(len(mainLines), len(overlayLines))
-//	for len(mainLines) < maxLines {
-//		mainLines = append(mainLines, "")
-//	}
-//	for len(overlayLines) < maxLines {
-//		overlayLines = append(overlayLines, "")
-//	}
-//
-//	// Combinar línea por línea: si la línea del overlay tiene contenido (no espacios), usarla
-//	result := make([]string, maxLines)
-//	for i := 0; i < maxLines; i++ {
-//		overlayLine := overlayLines[i]
-//		// Si la línea del overlay tiene contenido visible (no solo espacios), usarla
-//		if strings.TrimSpace(overlayLine) != "" {
-//			result[i] = overlayLine
-//		} else {
-//			result[i] = mainLines[i]
-//		}
-//	}
-//
-//	return strings.Join(result, "\n")
-//}
-
-//func (m model) renderWithDialog(dialog string) string {
-//	// Renderizar el contenido principal
-//	mainContent := m.renderMainContent()
-//
-//	// Usar PlaceEmbedded en lugar de Place para centrar el diálogo
-//	overlay := lipgloss.PlaceEmbedded(
-//		m.width,
-//		m.height,
-//		lipgloss.Center,
-//		lipgloss.Center,
-//		dialog,
-//	)
-//
-//	// Ahora basta con juntar el overlay sobre el contenido principal
-//	// Overlay devuelve sólo el bloque del diálogo en su posición
-//	// y el resto se mantiene como estaba en mainContent.
-//
-//	return overlay + "\n" + mainContent
-//}
-
-func (m model) renderWithDialog(dialog string) string {
+func (m uiModel) renderWithDialog(dialog string) string {
 	background := m.renderMainContent()
 	dialogCentered := lipgloss.Place(
 		m.width,
@@ -847,27 +717,16 @@ func (m model) renderWithDialog(dialog string) string {
 		lipgloss.Center,
 		dialog,
 	)
-	// Devuelve SOLO el diálogo, dejando que Bubbletea redibuje todo el frame
-	// así no "borra" texto lateral porque Place no pone relleno extra.
 	return background + "\n" + dialogCentered
 }
 
 func main() {
-	p := tea.NewProgram(initialModel(), tea.WithAltScreen(), tea.WithMouseCellMotion())
+	fileFlag := flag.String("file", "", "Text file to open")
+	flag.Parse()
+
+	p := tea.NewProgram(initialModel(*fileFlag), tea.WithAltScreen(), tea.WithMouseCellMotion())
 	if _, err := p.Run(); err != nil {
 		fmt.Printf("fatal: %v\n", err)
 		os.Exit(1)
 	}
-}
-
-func wordExists(words *[]string, word string) bool {
-	found := false
-	for _, v := range *words {
-		if v == word {
-			found = true
-			break
-		}
-	}
-
-	return found
 }
