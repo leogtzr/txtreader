@@ -488,7 +488,7 @@ func (m model) View() string {
 			}
 		}
 	} else if m.currentTab == 2 {
-		// Notas tab: show notes with navigation
+		// Notas tab: show notes with navigation and borders
 		if len(m.notes) == 0 {
 			b.WriteString(lipgloss.NewStyle().
 				Foreground(lipgloss.Color("252")).
@@ -496,26 +496,53 @@ func (m model) View() string {
 		} else {
 			viewStart := max(0, m.currentNoteIdx-contentHeight/2)
 			viewEnd := min(len(m.notes), viewStart+contentHeight)
-			for i := viewStart; i < viewEnd; i++ {
-				// Split note into lines and limit to contentHeight
+			renderedNotes := []string{}
+			usedHeight := 0
+			for i := viewStart; i < viewEnd && usedHeight < contentHeight; i++ {
+				// Split note into lines
 				lines := strings.Split(m.notes[i], "\n")
-				noteLines := lines
-				if len(lines) > contentHeight {
-					noteLines = lines[:contentHeight]
+				// Calculate note height (including padding and borders)
+				noteHeight := len(lines)
+				if noteHeight+2 > contentHeight-usedHeight {
+					// Limit lines to fit remaining height (2 for borders)
+					noteHeight = contentHeight - usedHeight - 2
+					if noteHeight < 1 {
+						break // No room for another note
+					}
+					lines = lines[:noteHeight]
 				}
-				noteText := strings.Join(noteLines, "\n")
+				noteText := strings.Join(lines, "\n")
+				// Determine max width for the note
+				maxWidth := 0
+				for _, line := range lines {
+					lineWidth := lipgloss.Width(line)
+					if lineWidth > maxWidth {
+						maxWidth = lineWidth
+					}
+				}
+				if maxWidth > m.width-6 { // Account for padding (2) and borders (4)
+					maxWidth = m.width - 6
+				}
+				// Apply styling with border
+				noteStyle := lipgloss.NewStyle().
+					Width(maxWidth).
+					Border(lipgloss.NormalBorder(), true).
+					BorderForeground(lipgloss.Color("244")). // Medium gray border
+					Padding(0, 1)
 				if i == m.currentNoteIdx {
-					b.WriteString(lipgloss.NewStyle().
+					noteStyle = noteStyle.
 						Background(lipgloss.Color("236")). // Darker gray background
-						Foreground(lipgloss.Color("15")). // Bright white text
-						Padding(0, 1).
-						Render(noteText) + "\n")
+						Foreground(lipgloss.Color("15")) // Bright white text
 				} else {
-					b.WriteString(lipgloss.NewStyle().
-						Foreground(lipgloss.Color("252")). // Light gray
-						Render(noteText) + "\n")
+					noteStyle = noteStyle.
+						Foreground(lipgloss.Color("252")) // Light gray
 				}
+				renderedNote := noteStyle.Render(noteText)
+				renderedNotes = append(renderedNotes, renderedNote)
+				usedHeight += noteHeight + 2 // Add border height
 			}
+			// Join notes vertically with a newline separator
+			b.WriteString(lipgloss.JoinVertical(lipgloss.Left, renderedNotes...) + "\n")
 		}
 	}
 
