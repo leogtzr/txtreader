@@ -16,18 +16,19 @@ import (
 )
 
 type model struct {
-	lines          []string
-	currentLine    int
-	currentWordIdx int
-	selectedWord   string
-	currentTab     int
-	tabs           []string
-	width, height  int
-	filePath       string
-	showDialog     bool
-	lineInput      string
-	tabWidths      []int // Store rendered width of each tab
-	vocabulary     []string
+	lines           []string
+	currentLine     int
+	currentWordIdx  int
+	selectedWord    string
+	currentTab      int
+	tabs            []string
+	width, height   int
+	filePath        string
+	showDialog      bool
+	lineInput       string
+	tabWidths       []int // Store rendered width of each tab
+	vocabulary      []string
+	currentVocabIdx int // Track selected vocabulary word
 }
 
 type progressEntry struct {
@@ -118,15 +119,16 @@ func saveProgress(filePath string, line int, vocabulary []string) error {
 
 func initialModel() model {
 	m := model{
-		tabs:           []string{"Texto", "Vocabulario", "Referencias"},
-		currentTab:     0,
-		currentLine:    0,
-		currentWordIdx: 0,
-		selectedWord:   "",
-		showDialog:     false,
-		lineInput:      "",
-		tabWidths:      make([]int, 3), // Initialize for 3 tabs
-		vocabulary:     []string{},
+		tabs:            []string{"Texto", "Vocabulario", "Referencias"},
+		currentTab:      0,
+		currentLine:     0,
+		currentWordIdx:  0,
+		currentVocabIdx: 0,
+		selectedWord:    "",
+		showDialog:      false,
+		lineInput:       "",
+		tabWidths:       make([]int, 3), // Initialize for 3 tabs
+		vocabulary:      []string{},
 	}
 
 	if len(os.Args) > 1 {
@@ -218,6 +220,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.currentTab = 0
 		case "2":
 			m.currentTab = 1
+			m.currentVocabIdx = 0 // Reset vocabulary index when switching to Vocabulario tab
 		case "3":
 			m.currentTab = 2
 		case "g":
@@ -226,44 +229,55 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.lineInput = ""
 			}
 		default:
-			if m.currentTab != 0 {
-				break
-			}
-			switch msg.String() {
-			case "j":
-				if m.currentLine < len(m.lines)-1 {
-					m.currentLine++
-					m.currentWordIdx = 0 // Reset word index on line change
-				}
-			case "k":
-				if m.currentLine > 0 {
-					m.currentLine--
-					m.currentWordIdx = 0 // Reset word index on line change
-				}
-			case "left":
-				words := strings.Fields(m.lines[m.currentLine])
-				if len(words) > 0 {
-					m.currentWordIdx = (m.currentWordIdx - 1 + len(words)) % len(words)
-				}
-			case "right":
-				words := strings.Fields(m.lines[m.currentLine])
-				if len(words) > 0 {
-					m.currentWordIdx = (m.currentWordIdx + 1) % len(words)
-				}
-			case "w":
-				words := strings.Fields(m.lines[m.currentLine])
-				if len(words) > 0 && m.currentWordIdx < len(words) {
-					m.selectedWord = words[m.currentWordIdx]
-					// Add to vocabulary if not already present
-					found := false
-					for _, v := range m.vocabulary {
-						if v == m.selectedWord {
-							found = true
-							break
+			if m.currentTab == 0 {
+				switch msg.String() {
+				case "j":
+					if m.currentLine < len(m.lines)-1 {
+						m.currentLine++
+						m.currentWordIdx = 0 // Reset word index on line change
+					}
+				case "k":
+					if m.currentLine > 0 {
+						m.currentLine--
+						m.currentWordIdx = 0 // Reset word index on line change
+					}
+				case "left":
+					words := strings.Fields(m.lines[m.currentLine])
+					if len(words) > 0 {
+						m.currentWordIdx = (m.currentWordIdx - 1 + len(words)) % len(words)
+					}
+				case "right":
+					words := strings.Fields(m.lines[m.currentLine])
+					if len(words) > 0 {
+						m.currentWordIdx = (m.currentWordIdx + 1) % len(words)
+					}
+				case "w":
+					words := strings.Fields(m.lines[m.currentLine])
+					if len(words) > 0 && m.currentWordIdx < len(words) {
+						// ToDo: move this logic to a separate function
+						m.selectedWord = words[m.currentWordIdx]
+						// Add to vocabulary if not already present
+						found := false
+						for _, v := range m.vocabulary {
+							if v == m.selectedWord {
+								found = true
+								break
+							}
+						}
+						if !found {
+							m.vocabulary = append(m.vocabulary, m.selectedWord)
 						}
 					}
-					if !found {
-						m.vocabulary = append(m.vocabulary, m.selectedWord)
+				}
+			} else if m.currentTab == 1 {
+				switch msg.String() {
+				case "j":
+					if m.currentVocabIdx < len(m.vocabulary)-1 {
+						m.currentVocabIdx++
+					}
+				case "k":
+					if m.currentVocabIdx > 0 {
+						m.currentVocabIdx--
 					}
 				}
 			}
@@ -276,6 +290,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				for i, width := range m.tabWidths {
 					if msg.X >= xPos && msg.X < xPos+width {
 						m.currentTab = i
+						if i == 1 {
+							m.currentVocabIdx = 0 // Reset vocabulary index when switching to Vocabulario tab
+						}
 						break
 					}
 					xPos += width
@@ -384,14 +401,28 @@ func (m model) View() string {
 			}
 		}
 	} else if m.currentTab == 1 {
-		// Vocabulario: show saved vocabulary
+		// Vocabulario tab: show vocabulary words with navigation
 		if len(m.vocabulary) == 0 {
-			b.WriteString("No hay palabras en el vocabulario.\n")
-		} else {
-			vocabText := strings.Join(m.vocabulary, "\n")
 			b.WriteString(lipgloss.NewStyle().
 				Foreground(lipgloss.Color("252")).
-				Render(vocabText) + "\n")
+				Render("No hay palabras en el vocabulario.\n"))
+		} else {
+			viewStart := max(0, m.currentVocabIdx-contentHeight/2)
+			viewEnd := min(len(m.vocabulary), viewStart+contentHeight)
+			for i := viewStart; i < viewEnd; i++ {
+				word := m.vocabulary[i]
+				if i == m.currentVocabIdx {
+					b.WriteString(lipgloss.NewStyle().
+						Background(lipgloss.Color("236")). // Darker gray background
+						Foreground(lipgloss.Color("15")). // Bright white text
+						Padding(0, 1).
+						Render(word) + "\n")
+				} else {
+					b.WriteString(lipgloss.NewStyle().
+						Foreground(lipgloss.Color("252")). // Light gray
+						Render(word) + "\n")
+				}
+			}
 		}
 	} else if m.currentTab == 2 {
 		// Referencias: placeholder
@@ -431,8 +462,10 @@ func (m model) View() string {
 	}
 	lineInfo := fmt.Sprintf("Línea: %d/%d (%.0f%%)", m.currentLine+1, total, percent)
 	selInfo := ""
-	if m.selectedWord != "" {
+	if m.currentTab == 0 && m.selectedWord != "" {
 		selInfo = fmt.Sprintf(" | Seleccionada: %s", m.selectedWord)
+	} else if m.currentTab == 1 && len(m.vocabulary) > 0 {
+		selInfo = fmt.Sprintf(" | Palabra: %s", m.vocabulary[m.currentVocabIdx])
 	}
 	status := lineInfo + selInfo
 	statusStyle := lipgloss.NewStyle().
