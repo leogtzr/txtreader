@@ -70,4 +70,10 @@ Dependencias principales (incluidas en `go.mod`):
 ```bash
 git clone https://github.com/tuusuario/txtreader.git
 cd txtreader
+./txtreader -file=archivo.txt
+```
+
+o:
+```bash
+go run main.go -file=archivo.txt
 ```
