@@ -304,6 +304,16 @@ func (m UiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 							fmt.Printf("Error copying word: %v\n", err)
 						}
 					}
+				case "0":
+					words := strings.Fields(m.lines[m.currentLine])
+					if len(words) > 0 {
+						m.currentWordIdx = 0
+					}
+				case "$":
+					words := strings.Fields(m.lines[m.currentLine])
+					if len(words) > 0 {
+						m.currentWordIdx = len(words) - 1
+					}
 				}
 			} else if m.currentTab == 1 {
 				switch msg.String() {
