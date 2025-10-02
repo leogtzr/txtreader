@@ -50,4 +50,24 @@ Su objetivo es proporcionar una experiencia interactiva para leer, tomar notas, 
 
 ---
 
-## 📂 Estructura del Proyecto
+## 🖥️ Requerimientos
+
+- [Go](https://golang.org/) **1.24 o superior**.
+- Sistema operativo compatible:
+    - Linux, MacOS o Windows (probado en terminales modernas).
+- Conexión a Internet si deseas usar enlaces externos (GoodReads / RAE).
+
+Dependencias principales (incluidas en `go.mod`):
+- [Bubbletea](https://github.com/charmbracelet/bubbletea) → Manejo de TUI reactiva.
+- [Lipgloss](https://github.com/charmbracelet/lipgloss) → Estilos visuales.
+- [atotto/clipboard](https://github.com/atotto/clipboard) → Copiar palabras al portapapeles.
+
+---
+
+## ⚙️ Instalación y Ejecución
+
+### Clonar el repositorio
+```bash
+git clone https://github.com/tuusuario/txtreader.git
+cd txtreader
+```
