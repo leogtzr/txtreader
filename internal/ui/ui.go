@@ -47,6 +47,7 @@ type UiModel struct {
 	longestLine           string   // The longest line content
 	longestLineLength     int      // Length of the longest line
 	longestWord           string
+	topWords              []stats.WordCount
 }
 
 func InitialModel(filePath string) UiModel {
@@ -73,6 +74,8 @@ func InitialModel(filePath string) UiModel {
 		totalWords:           0,
 		longestLine:          "",
 		longestLineLength:    0,
+		longestWord:          "",
+		topWords:             []stats.WordCount{},
 	}
 
 	m.filePath = filePath
@@ -137,6 +140,7 @@ func calculateStatistics(m *UiModel) {
 	m.longestLine = longest
 	m.longestLineLength = maxLen
 	m.longestWord = longestWordInLine
+	m.topWords = stats.Top3FrequentWords(m.lines)
 }
 
 func (m UiModel) Init() tea.Cmd {
@@ -614,6 +618,12 @@ func (m UiModel) renderMainContent() string {
 			"Línea más larga: " + boldStyle.Render(fmt.Sprintf("%d caracteres", m.longestLineLength)),
 			italicStyle.Render(m.longestLine),
 			"Palabra más larga: " + boldStyle.Render(m.longestWord),
+		}
+		if len(m.topWords) > 0 {
+			statsLines = append(statsLines, "Top palabras frecuentes:")
+			for i, wc := range m.topWords {
+				statsLines = append(statsLines, fmt.Sprintf("%d. %s: %d", i+1, wc.Word, wc.Count))
+			}
 		}
 		statsText := strings.Join(statsLines, "\n")
 		statsStyle := lipgloss.NewStyle().
