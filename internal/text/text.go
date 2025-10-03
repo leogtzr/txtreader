@@ -1,6 +1,9 @@
 package text
 
-import "regexp"
+import (
+	"strings"
+	"unicode"
+)
 
 func Contains(words *[]string, word string) bool {
 	found := false
@@ -14,15 +17,12 @@ func Contains(words *[]string, word string) bool {
 	return found
 }
 
-func SanitizeWord(line string) string {
-	//line = strings.ReplaceAll(line, ".", "")
-	//line = strings.ReplaceAll(line, ",", "")
-	//line = strings.ReplaceAll(line, "\"", "")
-	//line = strings.ReplaceAll(line, ")", "")
-	//line = strings.ReplaceAll(line, "(", "")
-	//line = strings.ReplaceAll(line, ":", "")
-	//line = strings.ReplaceAll(line, ";", "")
-	//return line
-	re := regexp.MustCompile(`[.,"()?:;\\]`)
-	return re.ReplaceAllString(line, "")
+func SanitizeWord(word string) string {
+	var sb strings.Builder
+	for _, r := range word {
+		if unicode.IsLetter(r) || unicode.IsDigit(r) {
+			sb.WriteRune(r)
+		}
+	}
+	return sb.String()
 }

@@ -1,3 +1,4 @@
+// ./internal/ui/ui.go
 package ui
 
 import (
@@ -11,6 +12,7 @@ import (
 	"strings"
 	"txtreader/internal/progress"
 	"txtreader/internal/text"
+	"txtreader/internal/text/stats"
 
 	"github.com/atotto/clipboard"
 	tea "github.com/charmbracelet/bubbletea"
@@ -40,11 +42,16 @@ type UiModel struct {
 	currentLinkIdx        int      // Track selected link
 	showDeleteNoteDialog  bool     // Track delete note confirmation dialog
 	deleteNoteConfirmIdx  int      // Track selected option in delete confirmation (0=No, 1=Yes)
+	totalLines            int      // Total number of lines
+	totalWords            int      // Total number of words
+	longestLine           string   // The longest line content
+	longestLineLength     int      // Length of the longest line
+	longestWord           string
 }
 
 func InitialModel(filePath string) UiModel {
 	m := UiModel{
-		tabs:                 []string{"Texto", "Vocabulario", "Notas"},
+		tabs:                 []string{"Texto", "Vocabulario", "Notas", "Estadísticas"},
 		currentTab:           0,
 		currentLine:          0,
 		currentWordIdx:       0,
@@ -54,7 +61,7 @@ func InitialModel(filePath string) UiModel {
 		selectedWord:         "",
 		showDialog:           false,
 		lineInput:            "",
-		tabWidths:            make([]int, 3), // Initialize for 3 tabs
+		tabWidths:            make([]int, 4), // Initialize for 4 tabs
 		vocabulary:           []string{},
 		notes:                []string{},
 		showNoteDialog:       false,
@@ -62,6 +69,10 @@ func InitialModel(filePath string) UiModel {
 		showLinksDialog:      false,
 		showDeleteNoteDialog: false,
 		deleteNoteConfirmIdx: 0, // Default to "No"
+		totalLines:           0,
+		totalWords:           0,
+		longestLine:          "",
+		longestLineLength:    0,
 	}
 
 	m.filePath = filePath
@@ -79,6 +90,9 @@ func InitialModel(filePath string) UiModel {
 		fmt.Printf("Error reading file: %v\n", err)
 		os.Exit(1)
 	}
+
+	calculateStatistics(&m)
+
 	// Load progress for the file
 	line, vocab, notes, err := progress.Load(m.filePath)
 	if err != nil {
@@ -98,6 +112,31 @@ func InitialModel(filePath string) UiModel {
 	m.notes = notes
 
 	return m
+}
+
+func calculateStatistics(m *UiModel) {
+	m.totalLines = len(m.lines)
+	var totalWords int
+	var maxLen int
+	var longest string
+	var longestWordInLine string
+	for _, line := range m.lines {
+		words := strings.Fields(line)
+		longestWord := stats.LongestWord(&words)
+		if len(longestWord) > len(longestWordInLine) {
+			longestWordInLine = longestWord
+		}
+		totalWords += len(words)
+		if len(line) > maxLen {
+			maxLen = len(line)
+			longest = line
+		}
+	}
+
+	m.totalWords = totalWords
+	m.longestLine = longest
+	m.longestLineLength = maxLen
+	m.longestWord = longestWordInLine
 }
 
 func (m UiModel) Init() tea.Cmd {
@@ -249,6 +288,8 @@ func (m UiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "3":
 			m.currentTab = 2
 			m.currentNoteIdx = 0 // Reset note index when switching to Notas tab
+		case "4":
+			m.currentTab = 3 // Switch to Estadísticas tab
 		case "n":
 			m.showNoteDialog = true
 			m.noteInput = []string{""} // Initialize note input
@@ -557,6 +598,31 @@ func (m UiModel) renderMainContent() string {
 			// Join notes vertically with a newline separator
 			content.WriteString(lipgloss.JoinVertical(lipgloss.Left, renderedNotes...) + "\n")
 		}
+	} else if m.currentTab == 3 {
+		// Estadísticas tab: show file statistics
+		boldStyle := lipgloss.NewStyle().
+			Bold(true).
+			Foreground(lipgloss.Color("15")).
+			Background(lipgloss.Color("28"))
+
+		italicStyle := lipgloss.NewStyle().
+			Italic(true)
+
+		statsLines := []string{
+			"Líneas totales: " + boldStyle.Render(fmt.Sprintf("%d", m.totalLines)),
+			"Palabras totales: " + boldStyle.Render(fmt.Sprintf("%d", m.totalWords)),
+			"Línea más larga: " + boldStyle.Render(fmt.Sprintf("%d caracteres", m.longestLineLength)),
+			italicStyle.Render(m.longestLine),
+			"Palabra más larga: " + boldStyle.Render(m.longestWord),
+		}
+		statsText := strings.Join(statsLines, "\n")
+		statsStyle := lipgloss.NewStyle().
+			Foreground(lipgloss.Color("15")). // Bright white
+			Background(lipgloss.Color("236")). // Darker gray
+			Padding(1, 2).
+			Border(lipgloss.RoundedBorder(), true).
+			BorderForeground(lipgloss.Color("51")) // Cyan border
+		content.WriteString(statsStyle.Render(statsText) + "\n")
 	}
 
 	// Status bar
