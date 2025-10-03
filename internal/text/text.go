@@ -1,5 +1,7 @@
 package text
 
+import "regexp"
+
 func Contains(words *[]string, word string) bool {
 	found := false
 	for _, v := range *words {
@@ -10,4 +12,17 @@ func Contains(words *[]string, word string) bool {
 	}
 
 	return found
+}
+
+func SanitizeWord(line string) string {
+	//line = strings.ReplaceAll(line, ".", "")
+	//line = strings.ReplaceAll(line, ",", "")
+	//line = strings.ReplaceAll(line, "\"", "")
+	//line = strings.ReplaceAll(line, ")", "")
+	//line = strings.ReplaceAll(line, "(", "")
+	//line = strings.ReplaceAll(line, ":", "")
+	//line = strings.ReplaceAll(line, ";", "")
+	//return line
+	re := regexp.MustCompile(`[.,"()?:;\\]`)
+	return re.ReplaceAllString(line, "")
 }

@@ -3,6 +3,7 @@ package ui
 import (
 	"bufio"
 	"fmt"
+	"net/url"
 	"os"
 	"os/exec"
 	"runtime"
@@ -171,29 +172,26 @@ func (m UiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			case "esc":
 				m.showLinksDialog = false
 				m.currentLinkIdx = 0
-			case "j":
+			case "j", "down":
 				if m.currentLinkIdx < 1 { // Only two items: GoodReads, RAE
 					m.currentLinkIdx++
 				}
-			case "k":
+			case "k", "up":
 				if m.currentLinkIdx > 0 {
 					m.currentLinkIdx--
 				}
 			case "enter":
 				// Open the selected link in the default browser
-				links := []string{"https://www.goodreads.com/", "https://www.rae.es/"}
+				links := []string{"https://www.goodreads.com/search?q=%s", "https://dle.rae.es/%s"}
 				if m.currentLinkIdx >= 0 && m.currentLinkIdx < len(links) {
-					url := links[m.currentLinkIdx]
-					var cmd *exec.Cmd
-					switch runtime.GOOS {
-					case "windows":
-						cmd = exec.Command("cmd", "/c", "start", url)
-					case "darwin":
-						cmd = exec.Command("open", url)
-					default: // linux, bsd, etc.
-						cmd = exec.Command("xdg-open", url)
+					// wordToSearch := url.QueryEscape(m.selectedWord)
+					words := strings.Fields(m.lines[m.currentLine])
+					var currentWord string
+					if len(words) > 0 && m.currentWordIdx < len(words) {
+						currentWord = words[m.currentWordIdx]
 					}
-					if err := cmd.Start(); err != nil {
+					urlToSearch := fmt.Sprintf(links[m.currentLinkIdx], url.QueryEscape(text.SanitizeWord(currentWord)))
+					if err := browserOpenURLCommand(runtime.GOOS, urlToSearch).Start(); err != nil {
 						fmt.Printf("Error opening browser: %v\n", err)
 					}
 				}
@@ -265,12 +263,12 @@ func (m UiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		default:
 			if m.currentTab == 0 {
 				switch msg.String() {
-				case "j":
+				case "j", "down":
 					if m.currentLine < len(m.lines)-1 {
 						m.currentLine++
 						m.currentWordIdx = 0 // Reset word index on line change
 					}
-				case "k":
+				case "k", "up":
 					if m.currentLine > 0 {
 						m.currentLine--
 						m.currentWordIdx = 0 // Reset word index on line change
@@ -791,4 +789,17 @@ func (m UiModel) renderWithDialog(dialog string) string {
 		dialog,
 	)
 	return background + "\n" + dialogCentered
+}
+
+func browserOpenURLCommand(osName, url string) *exec.Cmd {
+	switch osName {
+	case "linux":
+		return exec.Command("xdg-open", url)
+	case "windows":
+		return exec.Command("rundll32", "url.dll,FileProtocolHandler", url)
+	case "darwin":
+		return exec.Command("open", url)
+	default:
+		return nil
+	}
 }
