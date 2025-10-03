@@ -225,7 +225,7 @@ func (m UiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 			case "enter":
 				// Open the selected link in the default browser
-				links := []string{"https://www.goodreads.com/search?q=%s", "https://dle.rae.es/%s"}
+				links := []string{"https://dle.rae.es/%s", "https://www.goodreads.com/search?q=%s"}
 				if m.currentLinkIdx >= 0 && m.currentLinkIdx < len(links) {
 					// wordToSearch := url.QueryEscape(m.selectedWord)
 					words := strings.Fields(m.lines[m.currentLine])
@@ -333,9 +333,10 @@ func (m UiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					if len(words) > 0 && m.currentWordIdx < len(words) {
 						m.selectedWord = words[m.currentWordIdx]
 						// Add to vocabulary if not already present:
-						wordAlreadyInVocab := text.Contains(&m.vocabulary, m.selectedWord)
+						sanitizedWord := text.SanitizeWord(m.selectedWord)
+						wordAlreadyInVocab := text.Contains(&m.vocabulary, sanitizedWord)
 						if !wordAlreadyInVocab {
-							m.vocabulary = append(m.vocabulary, m.selectedWord)
+							m.vocabulary = append(m.vocabulary, sanitizedWord)
 						}
 					}
 				case "c":
@@ -740,7 +741,7 @@ func (m UiModel) renderLinksDialog() string {
 		Width(dialogWidth - 4).
 		Render("Seleccionar Enlace")
 
-	links := []string{"GoodReads", "Real Academia Española"}
+	links := []string{"Real Academia Española", "GoodReads"}
 	var linkItems []string
 	for i, link := range links {
 		style := lipgloss.NewStyle().
