@@ -59,6 +59,20 @@ type UiModel struct {
 
 const DefaultWPM = 250.0
 
+const (
+	brightWhiteColor  = lipgloss.Color("15")
+	blueColor         = lipgloss.Color("27")
+	cyanColor         = lipgloss.Color("51")
+	lightGrayColor    = lipgloss.Color("250")
+	darkGrayColor     = lipgloss.Color("237")
+	mediumGrayColor   = lipgloss.Color("244")
+	brightYellowColor = lipgloss.Color("226")
+	redColor          = lipgloss.Color("160")
+	royalBlueColor    = lipgloss.Color("63")
+	greenColor        = lipgloss.Color("28")
+	greyColor         = lipgloss.Color("235")
+)
+
 func InitialModel(filePath string) UiModel {
 	m := UiModel{
 		tabs:                 []string{"Texto", "Vocabulario", "Notas", "Estadísticas"},
@@ -505,17 +519,17 @@ func (m UiModel) renderMainContent() string {
 		if i == m.currentTab {
 			style = style.
 				Bold(true).
-				Foreground(lipgloss.Color("15")). // Bright white
-				Background(lipgloss.Color("27")). // Blue background
+				Foreground(brightWhiteColor).
+				Background(blueColor). // Blue background
 				Border(lipgloss.RoundedBorder(), true).
-				BorderForeground(lipgloss.Color("51")) // Cyan border
+				BorderForeground(cyanColor) // Cyan border
 		} else {
 			style = style.
 				Italic(true).
-				Foreground(lipgloss.Color("250")). // Light gray
-				Background(lipgloss.Color("237")). // Dark gray background
+				Foreground(lightGrayColor). // Light gray
+				Background(darkGrayColor). // Dark gray background
 				Border(lipgloss.NormalBorder(), true).
-				BorderForeground(lipgloss.Color("244")) // Medium gray border
+				BorderForeground(mediumGrayColor) // Medium gray border
 		}
 		renderedTab := style.Render(tab)
 		tabViews = append(tabViews, renderedTab)
@@ -526,7 +540,7 @@ func (m UiModel) renderMainContent() string {
 		Padding(0, 1).
 		Height(3). // Increased height to accommodate borders
 		Border(lipgloss.NormalBorder(), false, false, true, false).
-		Foreground(lipgloss.Color("244")). // Medium gray for border
+		Foreground(mediumGrayColor). // Medium gray for border
 		Render(tabBar)
 	content.WriteString(tabBar + "\n")
 
@@ -550,7 +564,7 @@ func (m UiModel) renderMainContent() string {
 					if j == m.currentWordIdx && len(words) > 0 {
 						highlightedWords = append(highlightedWords, lipgloss.NewStyle().
 							Bold(true).
-							Background(lipgloss.Color("226")). // Bright yellow
+							Background(brightYellowColor). // Bright yellow
 							Foreground(lipgloss.Color("232")). // Dark gray
 							Padding(0, 1).
 							Render(word))
@@ -562,13 +576,13 @@ func (m UiModel) renderMainContent() string {
 				// Apply line highlight
 				hlLine = lipgloss.NewStyle().
 					Background(lipgloss.Color("236")). // Darker gray background
-					Foreground(lipgloss.Color("15")). // Bright white text
+					Foreground(brightWhiteColor). // Bright white text
 					Padding(0, 1).
 					Render(hlLine)
 				content.WriteString(hlLine + "\n")
 			} else {
 				content.WriteString(lipgloss.NewStyle().
-					Foreground(lipgloss.Color("252")). // Light gray for non-current lines
+					Foreground(lipgloss.Color("250")). // Light gray for non-current lines
 					Render(m.lines[i]) + "\n")
 			}
 		}
@@ -587,7 +601,7 @@ func (m UiModel) renderMainContent() string {
 				if i == m.currentVocabIdx {
 					content.WriteString(lipgloss.NewStyle().
 						Background(lipgloss.Color("236")). // Darker gray background
-						Foreground(lipgloss.Color("15")). // Bright white text
+						Foreground(brightWhiteColor). // Bright white text
 						Padding(0, 1).
 						Render(word) + "\n")
 				} else {
@@ -642,7 +656,7 @@ func (m UiModel) renderMainContent() string {
 				if i == m.currentNoteIdx {
 					noteStyle = noteStyle.
 						Background(lipgloss.Color("236")). // Darker gray background
-						Foreground(lipgloss.Color("15")) // Bright white text
+						Foreground(brightWhiteColor) // Bright white text
 				} else {
 					noteStyle = noteStyle.
 						Foreground(lipgloss.Color("252")) // Light gray
@@ -658,8 +672,8 @@ func (m UiModel) renderMainContent() string {
 		// Estadísticas tab: show file statistics
 		boldStyle := lipgloss.NewStyle().
 			Bold(true).
-			Foreground(lipgloss.Color("15")).
-			Background(lipgloss.Color("28"))
+			Foreground(brightWhiteColor).
+			Background(greenColor)
 
 		italicStyle := lipgloss.NewStyle().
 			Italic(true)
@@ -682,11 +696,11 @@ func (m UiModel) renderMainContent() string {
 		}
 		statsText := strings.Join(statsLines, "\n")
 		statsStyle := lipgloss.NewStyle().
-			Foreground(lipgloss.Color("15")). // Bright white
+			Foreground(brightWhiteColor). // Bright white
 			Background(lipgloss.Color("236")). // Darker gray
 			Padding(1, 2).
 			Border(lipgloss.RoundedBorder(), true).
-			BorderForeground(lipgloss.Color("51")) // Cyan border
+			BorderForeground(cyanColor) // Cyan border
 		content.WriteString(statsStyle.Render(statsText) + "\n")
 	}
 
@@ -713,7 +727,7 @@ func (m UiModel) renderMainContent() string {
 		Padding(0, 1).
 		Height(1).
 		Bold(true).
-		Foreground(lipgloss.Color("15")). // Bright white
+		Foreground(brightWhiteColor).
 		Background(lipgloss.Color("234")). // Very dark gray
 		Width(m.width).
 		Align(lipgloss.Left)
@@ -753,10 +767,10 @@ func (m UiModel) renderGoToLineDialog() string {
 	dialog := lipgloss.NewStyle().
 		Width(30).
 		Border(lipgloss.RoundedBorder()).
-		BorderForeground(lipgloss.Color("63")).
+		BorderForeground(royalBlueColor).
 		Padding(1, 2).
 		Align(lipgloss.Center).
-		Background(lipgloss.Color("235")).
+		Background(greyColor).
 		Render(dialogContent)
 
 	return dialog
@@ -769,7 +783,7 @@ func (m UiModel) renderNoteDialog() string {
 	}
 
 	title := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("15")).
+		Foreground(brightWhiteColor).
 		Align(lipgloss.Center).
 		Padding(0, 0).
 		Width(dialogWidth - 4).
@@ -780,20 +794,20 @@ func (m UiModel) renderNoteDialog() string {
 		Width(dialogWidth - 4).
 		Height(10).
 		Border(lipgloss.NormalBorder()).
-		BorderForeground(lipgloss.Color("63")).
+		BorderForeground(royalBlueColor).
 		Padding(1).
 		Render(noteText)
 
 	saveButton := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("15")).
-		Background(lipgloss.Color("28")).
+		Foreground(brightWhiteColor).
+		Background(greenColor).
 		Padding(0, 2).
 		Margin(0, 1).
 		Render("Guardar (Ctrl+S)")
 
 	cancelButton := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("15")).
-		Background(lipgloss.Color("160")).
+		Foreground(brightWhiteColor).
+		Background(redColor).
 		Padding(0, 2).
 		Margin(0, 1).
 		Render("Cancelar (Ctrl+C)")
@@ -803,9 +817,9 @@ func (m UiModel) renderNoteDialog() string {
 
 	dialog := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
-		BorderForeground(lipgloss.Color("63")).
+		BorderForeground(royalBlueColor).
 		Padding(1).
-		Background(lipgloss.Color("235")).
+		Background(greyColor).
 		Render(dialogContent)
 
 	return dialog
@@ -815,7 +829,7 @@ func (m UiModel) renderLinksDialog() string {
 	dialogWidth := 40
 
 	title := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("15")).
+		Foreground(brightWhiteColor).
 		Align(lipgloss.Center).
 		Padding(0, 0).
 		Width(dialogWidth - 4).
@@ -831,7 +845,7 @@ func (m UiModel) renderLinksDialog() string {
 		if i == m.currentLinkIdx {
 			style = style.
 				Background(lipgloss.Color("236")).
-				Foreground(lipgloss.Color("15"))
+				Foreground(brightWhiteColor)
 		} else {
 			style = style.
 				Foreground(lipgloss.Color("252"))
@@ -843,20 +857,20 @@ func (m UiModel) renderLinksDialog() string {
 	listBox := lipgloss.NewStyle().
 		Width(dialogWidth-4).
 		Border(lipgloss.NormalBorder()).
-		BorderForeground(lipgloss.Color("63")).
+		BorderForeground(royalBlueColor).
 		Padding(0, 1).
 		Render(linksList)
 
 	goButton := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("15")).
-		Background(lipgloss.Color("28")).
+		Foreground(brightWhiteColor).
+		Background(greenColor).
 		Padding(0, 2).
 		Margin(0, 1).
 		Render("Ir A (Enter)")
 
 	cancelButton := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("15")).
-		Background(lipgloss.Color("160")).
+		Foreground(brightWhiteColor).
+		Background(redColor).
 		Padding(0, 2).
 		Margin(0, 1).
 		Render("Cancelar (Ctrl+C)")
@@ -866,9 +880,9 @@ func (m UiModel) renderLinksDialog() string {
 
 	dialog := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
-		BorderForeground(lipgloss.Color("63")).
+		BorderForeground(royalBlueColor).
 		Padding(1).
-		Background(lipgloss.Color("235")).
+		Background(greyColor).
 		Render(dialogContent)
 
 	return dialog
@@ -878,7 +892,7 @@ func (m UiModel) renderDeleteNoteDialog() string {
 	dialogWidth := 50
 
 	title := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("15")).
+		Foreground(brightWhiteColor).
 		Align(lipgloss.Center).
 		Padding(0, 0).
 		Width(dialogWidth - 4).
@@ -887,18 +901,18 @@ func (m UiModel) renderDeleteNoteDialog() string {
 
 	// Buttons: No and Yes
 	noButton := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("15")).
+		Foreground(brightWhiteColor).
 		Padding(0, 3).
 		Margin(0, 2)
 	yesButton := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("15")).
+		Foreground(brightWhiteColor).
 		Padding(0, 3).
 		Margin(0, 2)
 
 	if m.deleteNoteConfirmIdx == 0 {
 		// No is selected
 		noButton = noButton.
-			Background(lipgloss.Color("160")). // Red
+			Background(redColor). // Red
 			Bold(true)
 		yesButton = yesButton.
 			Background(lipgloss.Color("240")) // Gray
@@ -907,7 +921,7 @@ func (m UiModel) renderDeleteNoteDialog() string {
 		noButton = noButton.
 			Background(lipgloss.Color("240")) // Gray
 		yesButton = yesButton.
-			Background(lipgloss.Color("28")). // Green
+			Background(greenColor). // Green
 			Bold(true)
 	}
 
@@ -928,9 +942,9 @@ func (m UiModel) renderDeleteNoteDialog() string {
 	dialog := lipgloss.NewStyle().
 		Width(dialogWidth).
 		Border(lipgloss.RoundedBorder()).
-		BorderForeground(lipgloss.Color("196")). // Red border
+		BorderForeground(redColor). // Red border
 		Padding(1).
-		Background(lipgloss.Color("235")).
+		Background(greyColor).
 		Render(dialogContent)
 
 	return dialog
