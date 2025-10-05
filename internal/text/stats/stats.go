@@ -28,12 +28,12 @@ func isCommonWord(word string) bool {
 	return commonWords[word]
 }
 
-func Top3FrequentWords(lines []string) []WordCount {
+func TopNFrequentWords(lines []string) []WordCount {
 	wordCount := make(map[string]int)
 	for _, line := range lines {
 		words := strings.Fields(line)
 		for _, word := range words {
-			sanitized := text.SanitizeWord(strings.ToLower(word))
+			sanitized := text.SanitizeWord(word)
 			if sanitized != "" && !isCommonWord(sanitized) {
 				wordCount[sanitized] += 1
 			}
@@ -49,8 +49,8 @@ func Top3FrequentWords(lines []string) []WordCount {
 		}
 		return pairs[i].Word < pairs[j].Word
 	})
-	if len(pairs) > 3 {
-		return pairs[:3]
+	if len(pairs) > 10 {
+		return pairs[:10]
 	}
 	return pairs
 }

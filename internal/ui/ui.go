@@ -10,6 +10,7 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+	"time"
 	"txtreader/internal/progress"
 	"txtreader/internal/text"
 	"txtreader/internal/text/stats"
@@ -48,7 +49,15 @@ type UiModel struct {
 	longestLineLength     int      // Length of the longest line
 	longestWord           string
 	topWords              []stats.WordCount
+	cumulativeWords       []int   // Cumulative words up to each line
+	totalReadingSeconds   float64 // Total reading time in seconds (loaded from progress)
+	totalReadWords        int     // Total words read (loaded from progress)
+	sessionReadingTime    float64 // Session reading time in seconds
+	sessionWordsRead      int     // Session words read
+	lastActionTime        time.Time
 }
+
+const DefaultWPM = 250.0
 
 func InitialModel(filePath string) UiModel {
 	m := UiModel{
@@ -76,6 +85,12 @@ func InitialModel(filePath string) UiModel {
 		longestLineLength:    0,
 		longestWord:          "",
 		topWords:             []stats.WordCount{},
+		cumulativeWords:      []int{},
+		totalReadingSeconds:  0,
+		totalReadWords:       0,
+		sessionReadingTime:   0,
+		sessionWordsRead:     0,
+		lastActionTime:       time.Now(),
 	}
 
 	m.filePath = filePath
@@ -94,10 +109,19 @@ func InitialModel(filePath string) UiModel {
 		os.Exit(1)
 	}
 
+	// Compute cumulative words
+	m.cumulativeWords = make([]int, len(m.lines)+1)
+	m.cumulativeWords[0] = 0
+	for i := range m.lines {
+		words := strings.Fields(m.lines[i])
+		m.cumulativeWords[i+1] = m.cumulativeWords[i] + len(words)
+	}
+	m.totalWords = m.cumulativeWords[len(m.lines)]
+
 	calculateStatistics(&m)
 
 	// Load progress for the file
-	line, vocab, notes, err := progress.Load(m.filePath)
+	line, vocab, notes, readingSeconds, readWords, err := progress.Load(m.filePath)
 	if err != nil {
 		fmt.Printf("Error loading progress: %v\n", err)
 		os.Exit(1)
@@ -113,6 +137,8 @@ func InitialModel(filePath string) UiModel {
 	}
 	m.vocabulary = vocab
 	m.notes = notes
+	m.totalReadingSeconds = readingSeconds
+	m.totalReadWords = readWords
 
 	return m
 }
@@ -140,7 +166,7 @@ func calculateStatistics(m *UiModel) {
 	m.longestLine = longest
 	m.longestLineLength = maxLen
 	m.longestWord = longestWordInLine
-	m.topWords = stats.Top3FrequentWords(m.lines)
+	m.topWords = stats.TopNFrequentWords(m.lines)
 }
 
 func (m UiModel) Init() tea.Cmd {
@@ -158,8 +184,9 @@ func (m UiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			case "enter":
 				if m.lineInput != "" {
 					if lineNum, err := strconv.Atoi(m.lineInput); err == nil && lineNum > 0 && lineNum <= len(m.lines) {
-						m.currentLine = lineNum - 1 // Convert to 0-based index
-						m.currentWordIdx = 0        // Reset word index
+						m.currentLine = lineNum - 1   // Convert to 0-based index
+						m.currentWordIdx = 0          // Reset word index
+						m.lastActionTime = time.Now() // Reset action time after jump
 					}
 				}
 				m.showDialog = false
@@ -186,7 +213,8 @@ func (m UiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			case "backspace":
 				currentLine := len(m.noteInput) - 1
 				if len(m.noteInput[currentLine]) > 0 {
-					m.noteInput[currentLine] = m.noteInput[currentLine][:len(m.noteInput[currentLine])-1]
+					runes := []rune(m.noteInput[currentLine])
+					m.noteInput[currentLine] = string(runes[:len(runes)-1]) // Elimina la última runa
 				} else if currentLine > 0 {
 					m.noteInput = m.noteInput[:currentLine]
 				}
@@ -202,10 +230,15 @@ func (m UiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				// Cancel note
 				m.showNoteDialog = false
 				m.noteInput = []string{""} // Reset note input
+			case " ":
+				currentLine := len(m.noteInput) - 1
+				m.noteInput[currentLine] += " "
 			default:
-				if len(msg.String()) == 1 {
+				if msg.Type == tea.KeyRunes && len(msg.Runes) > 0 {
 					currentLine := len(m.noteInput) - 1
-					m.noteInput[currentLine] += msg.String()
+					for _, r := range msg.Runes {
+						m.noteInput[currentLine] += string(r)
+					}
 				}
 			}
 			return m, nil
@@ -227,7 +260,6 @@ func (m UiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				// Open the selected link in the default browser
 				links := []string{"https://dle.rae.es/%s", "https://www.goodreads.com/search?q=%s"}
 				if m.currentLinkIdx >= 0 && m.currentLinkIdx < len(links) {
-					// wordToSearch := url.QueryEscape(m.selectedWord)
 					words := strings.Fields(m.lines[m.currentLine])
 					var currentWord string
 					if len(words) > 0 && m.currentWordIdx < len(words) {
@@ -277,12 +309,24 @@ func (m UiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		switch msg.String() {
 		case "ctrl+c", "q":
+			// Save progress before quitting
+			m.totalReadingSeconds += m.sessionReadingTime
+			m.totalReadWords += m.sessionWordsRead
+			if m.filePath != "" {
+				if err := progress.Save(m.filePath, m.currentLine, m.vocabulary, m.notes, m.totalReadingSeconds, m.totalReadWords); err != nil {
+					fmt.Printf("Error saving progress: %v\n", err)
+				}
+			}
 			return m, tea.Quit
 		case "s":
 			if m.filePath != "" {
-				if err := progress.Save(m.filePath, m.currentLine, m.vocabulary, m.notes); err != nil {
+				m.totalReadingSeconds += m.sessionReadingTime
+				m.totalReadWords += m.sessionWordsRead
+				if err := progress.Save(m.filePath, m.currentLine, m.vocabulary, m.notes, m.totalReadingSeconds, m.totalReadWords); err != nil {
 					fmt.Printf("Error saving progress: %v\n", err)
 				}
+				m.sessionReadingTime = 0
+				m.sessionWordsRead = 0
 			}
 		case "1":
 			m.currentTab = 0
@@ -310,11 +354,19 @@ func (m UiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				switch msg.String() {
 				case "j", "down":
 					if m.currentLine < len(m.lines)-1 {
+						delta := time.Since(m.lastActionTime).Seconds()
+						if delta < 300 { // Ignore long idle periods (e.g., >5 min)
+							m.sessionReadingTime += delta
+							wordsInPrev := len(strings.Fields(m.lines[m.currentLine]))
+							m.sessionWordsRead += wordsInPrev
+						}
+						m.lastActionTime = time.Now()
 						m.currentLine++
 						m.currentWordIdx = 0 // Reset word index on line change
 					}
 				case "k", "up":
 					if m.currentLine > 0 {
+						m.lastActionTime = time.Now() // Update time but don't add to session (backtracking)
 						m.currentLine--
 						m.currentWordIdx = 0 // Reset word index on line change
 					}
@@ -372,7 +424,6 @@ func (m UiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				case "d":
 					// Delete current vocabulary word
 					if len(m.vocabulary) > 0 && m.currentVocabIdx < len(m.vocabulary) {
-						// Remove the word at currentVocabIdx
 						m.vocabulary = append(m.vocabulary[:m.currentVocabIdx], m.vocabulary[m.currentVocabIdx+1:]...)
 						// Adjust currentVocabIdx if necessary
 						if m.currentVocabIdx >= len(m.vocabulary) && len(m.vocabulary) > 0 {
@@ -613,12 +664,15 @@ func (m UiModel) renderMainContent() string {
 		italicStyle := lipgloss.NewStyle().
 			Italic(true)
 
+		wpm := m.getCurrentWPM()
+
 		statsLines := []string{
 			"Líneas totales: " + boldStyle.Render(fmt.Sprintf("%d", m.totalLines)),
 			"Palabras totales: " + boldStyle.Render(fmt.Sprintf("%d", m.totalWords)),
 			"Línea más larga: " + boldStyle.Render(fmt.Sprintf("%d caracteres", m.longestLineLength)),
 			italicStyle.Render(m.longestLine),
 			"Palabra más larga: " + boldStyle.Render(m.longestWord),
+			"Velocidad de lectura: " + boldStyle.Render(fmt.Sprintf("%.0f WPM", wpm)),
 		}
 		if len(m.topWords) > 0 {
 			statsLines = append(statsLines, "Top palabras frecuentes:")
@@ -653,7 +707,8 @@ func (m UiModel) renderMainContent() string {
 	} else if m.currentTab == 2 && len(m.notes) > 0 {
 		selInfo = fmt.Sprintf(" | Nota: %d/%d", m.currentNoteIdx+1, len(m.notes))
 	}
-	status := lineInfo + selInfo
+	timeLeft := m.remainingTimeString()
+	status := lineInfo + selInfo + " | Tiempo restante: " + timeLeft
 	statusStyle := lipgloss.NewStyle().
 		Padding(0, 1).
 		Height(1).
@@ -665,6 +720,31 @@ func (m UiModel) renderMainContent() string {
 	content.WriteString(statusStyle.Render(status))
 
 	return content.String()
+}
+
+func (m UiModel) getCurrentWPM() float64 {
+	totalSec := m.totalReadingSeconds + m.sessionReadingTime
+	totalWords := m.totalReadWords + m.sessionWordsRead
+	if totalSec > 0 && totalWords > 0 {
+		return float64(totalWords) / (totalSec / 60)
+	}
+	return DefaultWPM
+}
+
+func (m UiModel) remainingTimeString() string {
+	wpm := m.getCurrentWPM()
+	wordsRead := m.cumulativeWords[m.currentLine] + m.sessionWordsRead // Include session progress
+	wordsLeft := m.totalWords - wordsRead
+	if wordsLeft <= 0 {
+		return "0m"
+	}
+	minutesLeft := float64(wordsLeft) / wpm
+	hours := int(minutesLeft / 60)
+	mins := int(minutesLeft) % 60
+	if hours > 0 {
+		return fmt.Sprintf("%dh %dm", hours, mins)
+	}
+	return fmt.Sprintf("%dm", mins)
 }
 
 func (m UiModel) renderGoToLineDialog() string {

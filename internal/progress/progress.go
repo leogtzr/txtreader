@@ -1,3 +1,4 @@
+// ./internal/progress/progress.go
 package progress
 
 import (
@@ -9,7 +10,7 @@ import (
 	"txtreader/internal/utils"
 )
 
-func Save(filePath string, line int, vocabulary, notes []string) error {
+func Save(filePath string, line int, vocabulary, notes []string, readingSeconds float64, readWords int) error {
 	homeDir, err := os.UserHomeDir()
 	if err != nil {
 		return fmt.Errorf("error getting home directory: %v", err)
@@ -39,10 +40,12 @@ func Save(filePath string, line int, vocabulary, notes []string) error {
 	// Update progress entry
 	hash := utils.HashPath(filePath)
 	progress[hash] = model.ProgressEntry{
-		FileName:   filePath,
-		Line:       line,
-		Vocabulary: vocabulary,
-		Notes:      notes,
+		FileName:       filePath,
+		Line:           line,
+		Vocabulary:     vocabulary,
+		Notes:          notes,
+		ReadingSeconds: readingSeconds,
+		ReadWords:      readWords,
 	}
 
 	// Write back to file
@@ -56,29 +59,29 @@ func Save(filePath string, line int, vocabulary, notes []string) error {
 	return nil
 }
 
-func Load(filePath string) (int, []string, []string, error) {
+func Load(filePath string) (int, []string, []string, float64, int, error) {
 	homeDir, err := os.UserHomeDir()
 	if err != nil {
-		return 0, nil, nil, fmt.Errorf("error getting home directory: %v", err)
+		return 0, nil, nil, 0, 0, fmt.Errorf("error getting home directory: %v", err)
 	}
 	progressPath := filepath.Join(homeDir, "ltbr", "progress.json")
 
 	data, err := os.ReadFile(progressPath)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return 0, nil, nil, nil // No textProgress file exists, return default values
+			return 0, nil, nil, 0, 0, nil // No progress file exists, return default values
 		}
-		return 0, nil, nil, fmt.Errorf("error reading textProgress file: %v", err)
+		return 0, nil, nil, 0, 0, fmt.Errorf("error reading progress file: %v", err)
 	}
 
 	var textProgress model.ProgressMap
 	if err := json.Unmarshal(data, &textProgress); err != nil {
-		return 0, nil, nil, fmt.Errorf("error parsing textProgress file: %v", err)
+		return 0, nil, nil, 0, 0, fmt.Errorf("error parsing progress file: %v", err)
 	}
 
 	hash := utils.HashPath(filePath)
 	if entry, exists := textProgress[hash]; exists {
-		return entry.Line, entry.Vocabulary, entry.Notes, nil
+		return entry.Line, entry.Vocabulary, entry.Notes, entry.ReadingSeconds, entry.ReadWords, nil
 	}
-	return 0, nil, nil, nil // No entry for this file
+	return 0, nil, nil, 0, 0, nil // No entry for this file
 }
