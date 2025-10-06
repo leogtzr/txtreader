@@ -1,4 +1,3 @@
-// ./internal/progress/progress.go
 package progress
 
 import (

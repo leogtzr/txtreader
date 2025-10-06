@@ -1,4 +1,3 @@
-// ./internal/ui/ui.go
 package ui
 
 import (
@@ -73,7 +72,7 @@ const (
 	greyColor         = lipgloss.Color("235")
 )
 
-func InitialModel(filePath string) UiModel {
+func InitialModel(filePath string) (UiModel, error) {
 	m := UiModel{
 		tabs:                 []string{"Texto", "Vocabulario", "Notas", "Estadísticas"},
 		currentTab:           0,
@@ -110,8 +109,7 @@ func InitialModel(filePath string) UiModel {
 	m.filePath = filePath
 	file, err := os.Open(m.filePath)
 	if err != nil {
-		fmt.Printf("Error opening file: %v\n", err)
-		os.Exit(1)
+		return UiModel{}, err
 	}
 	defer file.Close()
 	scanner := bufio.NewScanner(file)
@@ -119,8 +117,7 @@ func InitialModel(filePath string) UiModel {
 		m.lines = append(m.lines, scanner.Text())
 	}
 	if err := scanner.Err(); err != nil {
-		fmt.Printf("Error reading file: %v\n", err)
-		os.Exit(1)
+		return UiModel{}, err
 	}
 
 	// Compute cumulative words
@@ -137,8 +134,7 @@ func InitialModel(filePath string) UiModel {
 	// Load progress for the file
 	line, vocab, notes, readingSeconds, readWords, err := progress.Load(m.filePath)
 	if err != nil {
-		fmt.Printf("Error loading progress: %v\n", err)
-		os.Exit(1)
+		return UiModel{}, err
 	}
 	if line > 0 && line < len(m.lines) {
 		m.currentLine = line
@@ -154,7 +150,7 @@ func InitialModel(filePath string) UiModel {
 	m.totalReadingSeconds = readingSeconds
 	m.totalReadWords = readWords
 
-	return m
+	return m, nil
 }
 
 func calculateStatistics(m *UiModel) {

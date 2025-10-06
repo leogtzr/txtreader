@@ -1,4 +1,3 @@
-// ./internal/text/stats/stats.go
 package stats
 
 import (
