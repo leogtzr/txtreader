@@ -155,9 +155,11 @@ func InitialModel(filePath string) (UiModel, error) {
 
 	m.vp = viewport.New(0, 0)              // Inicializa con tamaño 0; se setea en Update
 	m.vp.MouseWheelEnabled = true          // Opcional: habilita scroll con mouse wheel
-	m.vp.KeyMap = viewport.DefaultKeyMap() // Usa keymaps default (up/down, pgup/pgdn), pero puedes customizar
+	m.vp.KeyMap = viewport.DefaultKeyMap() // Usa keymaps default (up/down, pgup/pgdn)
+	m.vp.KeyMap.Up.SetEnabled(false)
+	m.vp.KeyMap.Down.SetEnabled(false)
 
-	m.vp.SetContent(strings.Join(m.lines, "\n")) // Establece contenido para calcular altura total
+	m.vp.SetContent(strings.Join(m.lines, "\n"))
 
 	return m, nil
 }
@@ -194,8 +196,6 @@ func (m UiModel) Init() tea.Cmd {
 
 func (m UiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
-	//case tea.MouseMsg:
-	//	fmt.Printf("Mouse event: %v\n", msg) // Imprime en consola para ver si detecta wheel
 	case tea.KeyMsg:
 		if m.showDialog {
 			switch msg.String() {
@@ -384,25 +384,23 @@ func (m UiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						}
 						m.lastActionTime = time.Now()
 						//m.currentLine++
-						m.currentLine = utils.Min(len(m.lines)-1, m.currentLine+1) // Agrega bound
-						m.currentWordIdx = 0                                       // Reset word index on line change
-						m.syncViewportOffset()                                     // Sincroniza viewport para centrar la nueva línea
+						m.currentLine = utils.Min(len(m.lines)-1, m.currentLine+1)
+						m.currentWordIdx = 0
+						m.syncViewportOffset() // Sincroniza viewport para centrar la nueva línea
 					}
 				case "k", "up":
 					if m.currentLine > 0 {
 						m.lastActionTime = time.Now() // Update time but don't add to session (backtracking)
 						//m.currentLine--
-						m.currentLine = utils.Max(0, m.currentLine-1) // Agrega bound
-						m.currentWordIdx = 0                          // Reset word index on line change
-						m.syncViewportOffset()                        // Sincroniza
+						m.currentLine = utils.Max(0, m.currentLine-1)
+						m.currentWordIdx = 0
+						m.syncViewportOffset() // Sincroniza
 					}
 				case "left":
-					//words := strings.Fields(m.lines[m.currentLine])
 					if len(palabras) > 0 {
 						m.currentWordIdx = (m.currentWordIdx - 1 + len(palabras)) % len(palabras)
 					}
 				case "right":
-					//words := strings.Fields(m.lines[m.currentLine])
 					if len(palabras) > 0 {
 						m.currentWordIdx = (m.currentWordIdx + 1) % len(palabras)
 					}
@@ -504,7 +502,6 @@ func (m UiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 	case tea.MouseMsg:
-		//fmt.Printf("Mouse event: %v\n", msg) // Mantén esto para depurar
 		if m.currentTab == 0 {
 			// Delega a viewport para wheel up/down
 			var cmd tea.Cmd
@@ -541,7 +538,6 @@ func (m UiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, cmd
 }
 
-// Helper para centrar la currentLine en el viewport
 func (m *UiModel) syncViewportOffset() {
 	halfHeight := m.vp.Height / 2
 	newOffset := utils.Max(0, m.currentLine-halfHeight)
