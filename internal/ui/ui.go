@@ -13,8 +13,10 @@ import (
 	"txtreader/internal/progress"
 	"txtreader/internal/text"
 	"txtreader/internal/text/stats"
+	"txtreader/internal/utils"
 
 	"github.com/atotto/clipboard"
+	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 )
@@ -54,6 +56,7 @@ type UiModel struct {
 	sessionReadingTime    float64 // Session reading time in seconds
 	sessionWordsRead      int     // Session words read
 	lastActionTime        time.Time
+	vp                    viewport.Model // Viewport para manejar scroll en el tab de texto
 }
 
 const DefaultWPM = 250.0
@@ -150,6 +153,12 @@ func InitialModel(filePath string) (UiModel, error) {
 	m.totalReadingSeconds = readingSeconds
 	m.totalReadWords = readWords
 
+	m.vp = viewport.New(0, 0)              // Inicializa con tamaño 0; se setea en Update
+	m.vp.MouseWheelEnabled = true          // Opcional: habilita scroll con mouse wheel
+	m.vp.KeyMap = viewport.DefaultKeyMap() // Usa keymaps default (up/down, pgup/pgdn), pero puedes customizar
+
+	m.vp.SetContent(strings.Join(m.lines, "\n")) // Establece contenido para calcular altura total
+
 	return m, nil
 }
 
@@ -185,6 +194,8 @@ func (m UiModel) Init() tea.Cmd {
 
 func (m UiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
+	//case tea.MouseMsg:
+	//	fmt.Printf("Mouse event: %v\n", msg) // Imprime en consola para ver si detecta wheel
 	case tea.KeyMsg:
 		if m.showDialog {
 			switch msg.String() {
@@ -361,39 +372,44 @@ func (m UiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.currentLinkIdx = 0
 		default:
 			if m.currentTab == 0 {
+				palabras := strings.Fields(m.lines[m.currentLine])
 				switch msg.String() {
 				case "j", "down":
 					if m.currentLine < len(m.lines)-1 {
 						delta := time.Since(m.lastActionTime).Seconds()
 						if delta < 300 { // Ignore long idle periods (e.g., >5 min)
 							m.sessionReadingTime += delta
-							wordsInPrev := len(strings.Fields(m.lines[m.currentLine]))
+							wordsInPrev := len(palabras)
 							m.sessionWordsRead += wordsInPrev
 						}
 						m.lastActionTime = time.Now()
-						m.currentLine++
-						m.currentWordIdx = 0 // Reset word index on line change
+						//m.currentLine++
+						m.currentLine = utils.Min(len(m.lines)-1, m.currentLine+1) // Agrega bound
+						m.currentWordIdx = 0                                       // Reset word index on line change
+						m.syncViewportOffset()                                     // Sincroniza viewport para centrar la nueva línea
 					}
 				case "k", "up":
 					if m.currentLine > 0 {
 						m.lastActionTime = time.Now() // Update time but don't add to session (backtracking)
-						m.currentLine--
-						m.currentWordIdx = 0 // Reset word index on line change
+						//m.currentLine--
+						m.currentLine = utils.Max(0, m.currentLine-1) // Agrega bound
+						m.currentWordIdx = 0                          // Reset word index on line change
+						m.syncViewportOffset()                        // Sincroniza
 					}
 				case "left":
-					words := strings.Fields(m.lines[m.currentLine])
-					if len(words) > 0 {
-						m.currentWordIdx = (m.currentWordIdx - 1 + len(words)) % len(words)
+					//words := strings.Fields(m.lines[m.currentLine])
+					if len(palabras) > 0 {
+						m.currentWordIdx = (m.currentWordIdx - 1 + len(palabras)) % len(palabras)
 					}
 				case "right":
-					words := strings.Fields(m.lines[m.currentLine])
-					if len(words) > 0 {
-						m.currentWordIdx = (m.currentWordIdx + 1) % len(words)
+					//words := strings.Fields(m.lines[m.currentLine])
+					if len(palabras) > 0 {
+						m.currentWordIdx = (m.currentWordIdx + 1) % len(palabras)
 					}
 				case "w":
-					words := strings.Fields(m.lines[m.currentLine])
-					if len(words) > 0 && m.currentWordIdx < len(words) {
-						m.selectedWord = words[m.currentWordIdx]
+					//words := strings.Fields(m.lines[m.currentLine])
+					if len(palabras) > 0 && m.currentWordIdx < len(palabras) {
+						m.selectedWord = palabras[m.currentWordIdx]
 						// Add to vocabulary if not already present:
 						sanitizedWord := text.SanitizeWord(m.selectedWord)
 						wordAlreadyInVocab := text.Contains(&m.vocabulary, sanitizedWord)
@@ -402,25 +418,33 @@ func (m UiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						}
 					}
 				case "c":
-					words := strings.Fields(m.lines[m.currentLine])
-					if len(words) > 0 && m.currentWordIdx < len(words) {
-						m.copiedToClipboardWord = words[m.currentWordIdx]
+					//words := strings.Fields(m.lines[m.currentLine])
+					if len(palabras) > 0 && m.currentWordIdx < len(palabras) {
+						m.copiedToClipboardWord = palabras[m.currentWordIdx]
 						err := clipboard.WriteAll(m.copiedToClipboardWord)
 						if err != nil {
 							fmt.Printf("Error copying word: %v\n", err)
 						}
 					}
 				case "0":
-					words := strings.Fields(m.lines[m.currentLine])
-					if len(words) > 0 {
+					//words := strings.Fields(m.lines[m.currentLine])
+					if len(palabras) > 0 {
 						m.currentWordIdx = 0
 					}
 				case "$":
-					words := strings.Fields(m.lines[m.currentLine])
-					if len(words) > 0 {
-						m.currentWordIdx = len(words) - 1
+					//words := strings.Fields(m.lines[m.currentLine])
+					if len(palabras) > 0 {
+						m.currentWordIdx = len(palabras) - 1
 					}
 				}
+
+				// Delega a viewport.Update para keys default como pgup/pgdn (no para "j/k" ya que los manejas manualmente)
+				var cmd tea.Cmd
+				m.vp, cmd = m.vp.Update(msg)
+				// Actualiza currentLine si YOffset cambió (ej. por pgup)
+				halfHeight := m.vp.Height / 2
+				m.currentLine = utils.Max(0, utils.Min(len(m.lines)-1, m.vp.YOffset+halfHeight))
+				return m, cmd
 			} else if m.currentTab == 1 {
 				switch msg.String() {
 				case "j":
@@ -478,11 +502,51 @@ func (m UiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 			}
 		}
+
+	case tea.MouseMsg:
+		//fmt.Printf("Mouse event: %v\n", msg) // Mantén esto para depurar
+		if m.currentTab == 0 {
+			// Delega a viewport para wheel up/down
+			var cmd tea.Cmd
+			m.vp, cmd = m.vp.Update(msg)
+			// Actualiza currentLine al centro visible si YOffset cambió
+			halfHeight := m.vp.Height / 2
+			m.currentLine = utils.Max(0, utils.Min(len(m.lines)-1, m.vp.YOffset+halfHeight))
+			return m, cmd
+		}
+
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
+
+		contentHeight := m.height - 4 // Ajuste existente para tab bar + status
+		if contentHeight < 1 {
+			contentHeight = 1
+		}
+		m.vp.Width = m.width - 2 // Ajusta para padding/borders si es necesario
+		m.vp.Height = contentHeight
+		// Sincroniza YOffset inicial para centrar currentLine (opcional, ver Paso 5)
+		m.syncViewportOffset()
 	}
-	return m, nil
+
+	//return m, nil
+	// Opcional: Delega a viewport.Update para keys default como up/down/pgup si quieres soporte adicional
+	var cmd tea.Cmd
+	m.vp, cmd = m.vp.Update(msg)
+
+	// Si YOffset cambió (ej. por mouse), actualiza currentLine al centro visible
+	halfHeight := m.vp.Height / 2
+	m.currentLine = utils.Max(0, utils.Min(len(m.lines)-1, m.vp.YOffset+halfHeight))
+
+	return m, cmd
+}
+
+// Helper para centrar la currentLine en el viewport
+func (m *UiModel) syncViewportOffset() {
+	halfHeight := m.vp.Height / 2
+	newOffset := utils.Max(0, m.currentLine-halfHeight)
+	maxOffset := utils.Max(0, len(m.lines)-m.vp.Height)
+	m.vp.YOffset = utils.Min(newOffset, maxOffset)
 }
 
 func (m UiModel) View() string {
@@ -548,8 +612,10 @@ func (m UiModel) renderMainContent() string {
 
 	if m.currentTab == 0 {
 		// Texto tab: show lines around current
-		viewStart := max(0, m.currentLine-contentHeight/2)
-		viewEnd := min(len(m.lines), viewStart+contentHeight)
+		//viewStart := utils.Max(0, m.currentLine-contentHeight/2)
+		//viewEnd := utils.Min(len(m.lines), viewStart+contentHeight)
+		viewStart := m.vp.YOffset                                 // Usa offset del viewport
+		viewEnd := utils.Min(len(m.lines), viewStart+m.vp.Height) // Visible height
 		for i := viewStart; i < viewEnd; i++ {
 			if i == m.currentLine {
 				// Highlight current line and word
@@ -590,8 +656,8 @@ func (m UiModel) renderMainContent() string {
 				Align(lipgloss.Right).
 				Render("No Vocab\n"))
 		} else {
-			viewStart := max(0, m.currentVocabIdx-contentHeight/2)
-			viewEnd := min(len(m.vocabulary), viewStart+contentHeight)
+			viewStart := utils.Max(0, m.currentVocabIdx-contentHeight/2)
+			viewEnd := utils.Min(len(m.vocabulary), viewStart+contentHeight)
 			for i := viewStart; i < viewEnd; i++ {
 				word := m.vocabulary[i]
 				if i == m.currentVocabIdx {
@@ -614,8 +680,8 @@ func (m UiModel) renderMainContent() string {
 				Foreground(lipgloss.Color("252")).
 				Render("No Notes\n"))
 		} else {
-			viewStart := max(0, m.currentNoteIdx-contentHeight/2)
-			viewEnd := min(len(m.notes), viewStart+contentHeight)
+			viewStart := utils.Max(0, m.currentNoteIdx-contentHeight/2)
+			viewEnd := utils.Min(len(m.notes), viewStart+contentHeight)
 			renderedNotes := []string{}
 			usedHeight := 0
 			for i := viewStart; i < viewEnd && usedHeight < contentHeight; i++ {
@@ -773,7 +839,7 @@ func (m UiModel) renderGoToLineDialog() string {
 }
 
 func (m UiModel) renderNoteDialog() string {
-	dialogWidth := min(m.width*3/4, m.width-4)
+	dialogWidth := utils.Min(m.width*3/4, m.width-4)
 	if dialogWidth > 80 {
 		dialogWidth = 80
 	}
