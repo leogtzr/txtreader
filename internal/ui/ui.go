@@ -73,6 +73,7 @@ const (
 	royalBlueColor    = lipgloss.Color("63")
 	greenColor        = lipgloss.Color("28")
 	greyColor         = lipgloss.Color("235")
+	grayColor         = lipgloss.Color("240")
 )
 
 func InitialModel(filePath string) (UiModel, error) {
@@ -520,7 +521,8 @@ func (m UiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if contentHeight < 1 {
 			contentHeight = 1
 		}
-		m.vp.Width = m.width - 2 // Ajusta para padding/borders si es necesario
+		// 2 for borders/padding if any
+		m.vp.Width = m.width - 2
 		m.vp.Height = contentHeight
 		// Sincroniza YOffset inicial para centrar currentLine (opcional, ver Paso 5)
 		m.syncViewportOffset()
@@ -614,7 +616,7 @@ func (m UiModel) renderMainContent() string {
 						highlightedWords = append(highlightedWords, lipgloss.NewStyle().
 							Bold(true).
 							Background(brightYellowColor). // Bright yellow
-							Foreground(lipgloss.Color("232")). // Dark gray
+							Foreground(greyColor). // Dark gray
 							Padding(0, 1).
 							Render(word))
 					} else {
@@ -624,14 +626,14 @@ func (m UiModel) renderMainContent() string {
 				hlLine := strings.Join(highlightedWords, " ")
 				// Apply line highlight
 				hlLine = lipgloss.NewStyle().
-					Background(lipgloss.Color("236")). // Darker gray background
+					Background(darkGrayColor). // Darker gray background
 					Foreground(brightWhiteColor). // Bright white text
 					Padding(0, 1).
 					Render(hlLine)
 				content.WriteString(hlLine + "\n")
 			} else {
 				content.WriteString(lipgloss.NewStyle().
-					Foreground(lipgloss.Color("250")). // Light gray for non-current lines
+					Foreground(lightGrayColor). // Light gray for non-current lines
 					Render(m.lines[i]) + "\n")
 			}
 		}
@@ -639,7 +641,7 @@ func (m UiModel) renderMainContent() string {
 		// Vocabulario tab: show vocabulary words with navigation
 		if len(m.vocabulary) == 0 {
 			content.WriteString(lipgloss.NewStyle().
-				Foreground(lipgloss.Color("252")).
+				Foreground(lightGrayColor).
 				Align(lipgloss.Right).
 				Render("No Vocab\n"))
 		} else {
@@ -649,13 +651,13 @@ func (m UiModel) renderMainContent() string {
 				word := m.vocabulary[i]
 				if i == m.currentVocabIdx {
 					content.WriteString(lipgloss.NewStyle().
-						Background(lipgloss.Color("236")). // Darker gray background
+						Background(darkGrayColor). // Darker gray background
 						Foreground(brightWhiteColor). // Bright white text
 						Padding(0, 1).
 						Render(word) + "\n")
 				} else {
 					content.WriteString(lipgloss.NewStyle().
-						Foreground(lipgloss.Color("252")). // Light gray
+						Foreground(lightGrayColor). // Light gray
 						Render(word) + "\n")
 				}
 			}
@@ -664,7 +666,7 @@ func (m UiModel) renderMainContent() string {
 		// Notas tab: show notes with navigation and borders
 		if len(m.notes) == 0 {
 			content.WriteString(lipgloss.NewStyle().
-				Foreground(lipgloss.Color("252")).
+				Foreground(lightGrayColor).
 				Render("No Notes\n"))
 		} else {
 			viewStart := utils.Max(0, m.currentNoteIdx-contentHeight/2)
@@ -700,15 +702,15 @@ func (m UiModel) renderMainContent() string {
 				noteStyle := lipgloss.NewStyle().
 					Width(maxWidth).
 					Border(lipgloss.NormalBorder(), true).
-					BorderForeground(lipgloss.Color("244")). // Medium gray border
+					BorderForeground(mediumGrayColor). // Medium gray border
 					Padding(0, 1)
 				if i == m.currentNoteIdx {
 					noteStyle = noteStyle.
-						Background(lipgloss.Color("236")). // Darker gray background
+						Background(greyColor). // Darker gray background
 						Foreground(brightWhiteColor) // Bright white text
 				} else {
 					noteStyle = noteStyle.
-						Foreground(lipgloss.Color("252")) // Light gray
+						Foreground(lightGrayColor) // Light gray
 				}
 				renderedNote := noteStyle.Render(noteText)
 				renderedNotes = append(renderedNotes, renderedNote)
@@ -746,7 +748,7 @@ func (m UiModel) renderMainContent() string {
 		statsText := strings.Join(statsLines, "\n")
 		statsStyle := lipgloss.NewStyle().
 			Foreground(brightWhiteColor). // Bright white
-			Background(lipgloss.Color("236")). // Darker gray
+			Background(darkGrayColor). // Darker gray
 			Padding(1, 2).
 			Border(lipgloss.RoundedBorder(), true).
 			BorderForeground(cyanColor) // Cyan border
@@ -777,7 +779,7 @@ func (m UiModel) renderMainContent() string {
 		Height(1).
 		Bold(true).
 		Foreground(brightWhiteColor).
-		Background(lipgloss.Color("234")). // Very dark gray
+		Background(darkGrayColor). // Very dark gray
 		Width(m.width).
 		Align(lipgloss.Left)
 	content.WriteString(statusStyle.Render(status))
@@ -893,11 +895,10 @@ func (m UiModel) renderLinksDialog() string {
 			Align(lipgloss.Left)
 		if i == m.currentLinkIdx {
 			style = style.
-				Background(lipgloss.Color("236")).
+				Background(darkGrayColor).
 				Foreground(brightWhiteColor)
 		} else {
-			style = style.
-				Foreground(lipgloss.Color("252"))
+			style = style.Foreground(lightGrayColor)
 		}
 		linkItems = append(linkItems, style.Render(link))
 	}
@@ -961,16 +962,16 @@ func (m UiModel) renderDeleteNoteDialog() string {
 	if m.deleteNoteConfirmIdx == 0 {
 		// No is selected
 		noButton = noButton.
-			Background(redColor). // Red
+			Background(redColor).
 			Bold(true)
 		yesButton = yesButton.
-			Background(lipgloss.Color("240")) // Gray
+			Background(grayColor)
 	} else {
 		// Yes is selected
 		noButton = noButton.
-			Background(lipgloss.Color("240")) // Gray
+			Background(grayColor)
 		yesButton = yesButton.
-			Background(greenColor). // Green
+			Background(greenColor).
 			Bold(true)
 	}
 
@@ -981,7 +982,7 @@ func (m UiModel) renderDeleteNoteDialog() string {
 	)
 
 	hint := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("244")).
+		Foreground(mediumGrayColor).
 		Align(lipgloss.Center).
 		Width(dialogWidth - 4).
 		Render("← → para navegar | Enter para confirmar | Esc para cancelar")
