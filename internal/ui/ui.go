@@ -31,7 +31,7 @@ type UiModel struct {
 	tabs                  []string
 	width, height         int
 	filePath              string
-	showDialog            bool
+	showGotoLineDialog    bool
 	lineInput             string
 	tabWidths             []int // Store rendered width of each tab
 	vocabulary            []string
@@ -77,11 +77,28 @@ const (
 )
 
 const (
-	keyQuit     = "q"
-	keySave     = "s"
-	keyNextLine = "j"
-	keyPrevLine = "k"
-	keyEsc      = "esc"
+	keyQuit            = "q"
+	keySave            = "s"
+	keyNextLine        = "j"
+	keyPrevLine        = "k"
+	keyEsc             = "esc"
+	keyMainTextTab     = "1"
+	keyVocabTab        = "2"
+	keyNotesTab        = "3"
+	keyStatsTab        = "4"
+	keyShowNoteDialog  = "n"
+	keyEnter           = "enter"
+	keyBackspace       = "backspace"
+	keyEspace          = " "
+	keyCancel          = "ctrl+c"
+	keyDelete          = "d"
+	keyOpenLinksDialog = "o"
+	keyControlSave     = "ctrl+s"
+	keyLeft            = "left"
+	keyRight           = "right"
+	keyAddToVocabulary = "w"
+	keyCopyToClipboard = "c"
+	keyGotoLineDialog  = "g"
 )
 
 func InitialModel(filePath string) (UiModel, error) {
@@ -94,7 +111,7 @@ func InitialModel(filePath string) (UiModel, error) {
 		currentNoteIdx:       0,
 		currentLinkIdx:       0,
 		selectedWord:         "",
-		showDialog:           false,
+		showGotoLineDialog:   false,
 		lineInput:            "",
 		tabWidths:            make([]int, 4), // Initialize for 4 tabs
 		vocabulary:           []string{},
@@ -206,12 +223,12 @@ func (m UiModel) Init() tea.Cmd {
 func (m UiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
-		if m.showDialog {
+		if m.showGotoLineDialog {
 			switch msg.String() {
 			case keyEsc:
-				m.showDialog = false
+				m.showGotoLineDialog = false
 				m.lineInput = ""
-			case "enter":
+			case keyEnter:
 				if m.lineInput != "" {
 					if lineNum, err := strconv.Atoi(m.lineInput); err == nil && lineNum > 0 && lineNum <= len(m.lines) {
 						m.currentLine = lineNum - 1   // Convert to 0-based index
@@ -219,9 +236,9 @@ func (m UiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						m.lastActionTime = time.Now() // Reset action time after jump
 					}
 				}
-				m.showDialog = false
+				m.showGotoLineDialog = false
 				m.lineInput = ""
-			case "backspace":
+			case keyBackspace:
 				if len(m.lineInput) > 0 {
 					m.lineInput = m.lineInput[:len(m.lineInput)-1]
 				}
@@ -237,10 +254,10 @@ func (m UiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			case keyEsc:
 				m.showNoteDialog = false
 				m.noteInput = []string{""} // Reset note input
-			case "enter":
+			case keyEnter:
 				// Add new line to note input
 				m.noteInput = append(m.noteInput, "")
-			case "backspace":
+			case keyBackspace:
 				currentLine := len(m.noteInput) - 1
 				if len(m.noteInput[currentLine]) > 0 {
 					runes := []rune(m.noteInput[currentLine])
@@ -248,7 +265,7 @@ func (m UiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				} else if currentLine > 0 {
 					m.noteInput = m.noteInput[:currentLine]
 				}
-			case "ctrl+s":
+			case keyControlSave:
 				// Save note
 				note := strings.Join(m.noteInput, "\n")
 				if note != "" {
@@ -256,11 +273,11 @@ func (m UiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 				m.showNoteDialog = false
 				m.noteInput = []string{""} // Reset note input
-			case "ctrl+c":
+			case keyCancel:
 				// Cancel note
 				m.showNoteDialog = false
 				m.noteInput = []string{""} // Reset note input
-			case " ":
+			case keyEspace:
 				currentLine := len(m.noteInput) - 1
 				m.noteInput[currentLine] += " "
 			default:
@@ -286,7 +303,7 @@ func (m UiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if m.currentLinkIdx > 0 {
 					m.currentLinkIdx--
 				}
-			case "enter":
+			case keyEnter:
 				// Open the selected link in the default browser
 				links := []string{"https://dle.rae.es/%s", "https://www.goodreads.com/search?q=%s"}
 				if m.currentLinkIdx >= 0 && m.currentLinkIdx < len(links) {
@@ -302,7 +319,7 @@ func (m UiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 				m.showLinksDialog = false
 				m.currentLinkIdx = 0
-			case "ctrl+c":
+			case keyCancel:
 				// Cancel the dialog
 				m.showLinksDialog = false
 				m.currentLinkIdx = 0
@@ -314,11 +331,11 @@ func (m UiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			case keyEsc:
 				m.showDeleteNoteDialog = false
 				m.deleteNoteConfirmIdx = 0
-			case "left", "h":
+			case keyLeft, "h":
 				m.deleteNoteConfirmIdx = 0 // No
-			case "right", "l":
+			case keyRight, "l":
 				m.deleteNoteConfirmIdx = 1 // Yes
-			case "enter":
+			case keyEnter:
 				if m.deleteNoteConfirmIdx == 1 { // Yes selected
 					// Delete the note
 					if len(m.notes) > 0 && m.currentNoteIdx < len(m.notes) {
@@ -338,7 +355,7 @@ func (m UiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		switch msg.String() {
-		case "ctrl+c", keyQuit:
+		case keyCancel, keyQuit:
 			// Save progress before quitting
 			m.totalReadingSeconds += m.sessionReadingTime
 			m.totalReadWords += m.sessionWordsRead
@@ -358,32 +375,32 @@ func (m UiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.sessionReadingTime = 0
 				m.sessionWordsRead = 0
 			}
-		case "1":
+		case keyMainTextTab:
 			m.currentTab = 0
-		case "2":
+		case keyVocabTab:
 			m.currentTab = 1
 			m.currentVocabIdx = 0 // Reset vocabulary index when switching to Vocabulario tab
-		case "3":
+		case keyNotesTab:
 			m.currentTab = 2
 			m.currentNoteIdx = 0 // Reset note index when switching to Notas tab
-		case "4":
-			m.currentTab = 3 // Switch to Estadísticas tab
-		case "n":
+		case keyStatsTab:
+			m.currentTab = 3
+		case keyShowNoteDialog:
 			m.showNoteDialog = true
 			m.noteInput = []string{""} // Initialize note input
-		case "g":
+		case keyGotoLineDialog:
 			if m.currentTab == 0 {
-				m.showDialog = true
+				m.showGotoLineDialog = true
 				m.lineInput = ""
 			}
-		case "o":
+		case keyOpenLinksDialog:
 			m.showLinksDialog = true
 			m.currentLinkIdx = 0
 		default:
 			if m.currentTab == 0 {
 				palabras := strings.Fields(m.lines[m.currentLine])
 				switch msg.String() {
-				case "j", "down":
+				case keyNextLine, "down":
 					if m.currentLine < len(m.lines)-1 {
 						delta := time.Since(m.lastActionTime).Seconds()
 						if delta < 300 { // Ignore long idle periods (e.g., >5 min)
@@ -397,7 +414,7 @@ func (m UiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						m.currentWordIdx = 0
 						m.syncViewportOffset() // Sincroniza viewport para centrar la nueva línea
 					}
-				case "k", "up":
+				case keyPrevLine, "up":
 					if m.currentLine > 0 {
 						m.lastActionTime = time.Now() // Update time but don't add to session (backtracking)
 						//m.currentLine--
@@ -405,15 +422,15 @@ func (m UiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						m.currentWordIdx = 0
 						m.syncViewportOffset() // Sincroniza
 					}
-				case "left":
+				case keyLeft:
 					if len(palabras) > 0 {
 						m.currentWordIdx = (m.currentWordIdx - 1 + len(palabras)) % len(palabras)
 					}
-				case "right":
+				case keyRight:
 					if len(palabras) > 0 {
 						m.currentWordIdx = (m.currentWordIdx + 1) % len(palabras)
 					}
-				case "w":
+				case keyAddToVocabulary:
 					if len(palabras) > 0 && m.currentWordIdx < len(palabras) {
 						m.selectedWord = palabras[m.currentWordIdx]
 						// Add to vocabulary if not already present:
@@ -423,7 +440,7 @@ func (m UiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 							m.vocabulary = append(m.vocabulary, sanitizedWord)
 						}
 					}
-				case "c":
+				case keyCopyToClipboard:
 					if len(palabras) > 0 && m.currentWordIdx < len(palabras) {
 						m.copiedToClipboardWord = palabras[m.currentWordIdx]
 						err := clipboard.WriteAll(m.copiedToClipboardWord)
@@ -450,15 +467,15 @@ func (m UiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, cmd
 			} else if m.currentTab == 1 {
 				switch msg.String() {
-				case "j":
+				case keyNextLine:
 					if m.currentVocabIdx < len(m.vocabulary)-1 {
 						m.currentVocabIdx++
 					}
-				case "k":
+				case keyPrevLine:
 					if m.currentVocabIdx > 0 {
 						m.currentVocabIdx--
 					}
-				case "d":
+				case keyDelete:
 					// Delete current vocabulary word
 					if len(m.vocabulary) > 0 && m.currentVocabIdx < len(m.vocabulary) {
 						m.vocabulary = append(m.vocabulary[:m.currentVocabIdx], m.vocabulary[m.currentVocabIdx+1:]...)
@@ -473,15 +490,15 @@ func (m UiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 			} else if m.currentTab == 2 {
 				switch msg.String() {
-				case "j":
+				case keyNextLine:
 					if m.currentNoteIdx < len(m.notes)-1 {
 						m.currentNoteIdx++
 					}
-				case "k":
+				case keyPrevLine:
 					if m.currentNoteIdx > 0 {
 						m.currentNoteIdx--
 					}
-				case "d":
+				case keyDelete:
 					// Delete current note
 					if len(m.notes) > 0 && m.currentNoteIdx < len(m.notes) {
 						// Check if confirmation is required
@@ -543,7 +560,7 @@ func (m *UiModel) syncViewportOffset() {
 }
 
 func (m UiModel) View() string {
-	if m.showDialog {
+	if m.showGotoLineDialog {
 		return m.renderWithDialog(m.renderGoToLineDialog())
 	}
 	if m.showNoteDialog {
