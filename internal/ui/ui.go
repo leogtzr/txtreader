@@ -76,6 +76,14 @@ const (
 	grayColor         = lipgloss.Color("240")
 )
 
+const (
+	keyQuit     = "q"
+	keySave     = "s"
+	keyNextLine = "j"
+	keyPrevLine = "k"
+	keyEsc      = "esc"
+)
+
 func InitialModel(filePath string) (UiModel, error) {
 	m := UiModel{
 		tabs:                 []string{"Texto", "Vocabulario", "Notas", "Estadísticas"},
@@ -154,9 +162,9 @@ func InitialModel(filePath string) (UiModel, error) {
 	m.totalReadingSeconds = readingSeconds
 	m.totalReadWords = readWords
 
-	m.vp = viewport.New(0, 0)              // Inicializa con tamaño 0; se setea en Update
-	m.vp.MouseWheelEnabled = true          // Opcional: habilita scroll con mouse wheel
-	m.vp.KeyMap = viewport.DefaultKeyMap() // Usa keymaps default (up/down, pgup/pgdn)
+	m.vp = viewport.New(0, 0) // Initialize to 0, Update() will set it.
+	m.vp.MouseWheelEnabled = true
+	m.vp.KeyMap = viewport.DefaultKeyMap()
 	m.vp.KeyMap.Up.SetEnabled(false)
 	m.vp.KeyMap.Down.SetEnabled(false)
 
@@ -200,7 +208,7 @@ func (m UiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.KeyMsg:
 		if m.showDialog {
 			switch msg.String() {
-			case "esc":
+			case keyEsc:
 				m.showDialog = false
 				m.lineInput = ""
 			case "enter":
@@ -226,7 +234,7 @@ func (m UiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if m.showNoteDialog {
 			switch msg.String() {
-			case "esc":
+			case keyEsc:
 				m.showNoteDialog = false
 				m.noteInput = []string{""} // Reset note input
 			case "enter":
@@ -267,14 +275,14 @@ func (m UiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if m.showLinksDialog {
 			switch msg.String() {
-			case "esc":
+			case keyEsc:
 				m.showLinksDialog = false
 				m.currentLinkIdx = 0
-			case "j", "down":
+			case keyNextLine, "down":
 				if m.currentLinkIdx < 1 { // Only two items: GoodReads, RAE
 					m.currentLinkIdx++
 				}
-			case "k", "up":
+			case keyPrevLine, "up":
 				if m.currentLinkIdx > 0 {
 					m.currentLinkIdx--
 				}
@@ -303,7 +311,7 @@ func (m UiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if m.showDeleteNoteDialog {
 			switch msg.String() {
-			case "esc":
+			case keyEsc:
 				m.showDeleteNoteDialog = false
 				m.deleteNoteConfirmIdx = 0
 			case "left", "h":
@@ -330,7 +338,7 @@ func (m UiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		switch msg.String() {
-		case "ctrl+c", "q":
+		case "ctrl+c", keyQuit:
 			// Save progress before quitting
 			m.totalReadingSeconds += m.sessionReadingTime
 			m.totalReadWords += m.sessionWordsRead
@@ -340,7 +348,7 @@ func (m UiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 			}
 			return m, tea.Quit
-		case "s":
+		case keySave:
 			if m.filePath != "" {
 				m.totalReadingSeconds += m.sessionReadingTime
 				m.totalReadWords += m.sessionWordsRead
@@ -406,7 +414,6 @@ func (m UiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						m.currentWordIdx = (m.currentWordIdx + 1) % len(palabras)
 					}
 				case "w":
-					//words := strings.Fields(m.lines[m.currentLine])
 					if len(palabras) > 0 && m.currentWordIdx < len(palabras) {
 						m.selectedWord = palabras[m.currentWordIdx]
 						// Add to vocabulary if not already present:
@@ -417,7 +424,6 @@ func (m UiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						}
 					}
 				case "c":
-					//words := strings.Fields(m.lines[m.currentLine])
 					if len(palabras) > 0 && m.currentWordIdx < len(palabras) {
 						m.copiedToClipboardWord = palabras[m.currentWordIdx]
 						err := clipboard.WriteAll(m.copiedToClipboardWord)
@@ -426,12 +432,10 @@ func (m UiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						}
 					}
 				case "0":
-					//words := strings.Fields(m.lines[m.currentLine])
 					if len(palabras) > 0 {
 						m.currentWordIdx = 0
 					}
 				case "$":
-					//words := strings.Fields(m.lines[m.currentLine])
 					if len(palabras) > 0 {
 						m.currentWordIdx = len(palabras) - 1
 					}
@@ -569,16 +573,16 @@ func (m UiModel) renderMainContent() string {
 			style = style.
 				Bold(true).
 				Foreground(brightWhiteColor).
-				Background(blueColor). // Blue background
+				Background(blueColor).
 				Border(lipgloss.RoundedBorder(), true).
-				BorderForeground(cyanColor) // Cyan border
+				BorderForeground(cyanColor)
 		} else {
 			style = style.
 				Italic(true).
-				Foreground(lightGrayColor). // Light gray
-				Background(darkGrayColor). // Dark gray background
+				Foreground(lightGrayColor).
+				Background(darkGrayColor).
 				Border(lipgloss.NormalBorder(), true).
-				BorderForeground(mediumGrayColor) // Medium gray border
+				BorderForeground(mediumGrayColor)
 		}
 		renderedTab := style.Render(tab)
 		tabViews = append(tabViews, renderedTab)
@@ -589,7 +593,7 @@ func (m UiModel) renderMainContent() string {
 		Padding(0, 1).
 		Height(3). // Increased height to accommodate borders
 		Border(lipgloss.NormalBorder(), false, false, true, false).
-		Foreground(mediumGrayColor). // Medium gray for border
+		Foreground(mediumGrayColor).
 		Render(tabBar)
 	content.WriteString(tabBar + "\n")
 
@@ -601,8 +605,6 @@ func (m UiModel) renderMainContent() string {
 
 	if m.currentTab == 0 {
 		// Texto tab: show lines around current
-		//viewStart := utils.Max(0, m.currentLine-contentHeight/2)
-		//viewEnd := utils.Min(len(m.lines), viewStart+contentHeight)
 		viewStart := m.vp.YOffset                                 // Usa offset del viewport
 		viewEnd := utils.Min(len(m.lines), viewStart+m.vp.Height) // Visible height
 		for i := viewStart; i < viewEnd; i++ {
@@ -615,8 +617,8 @@ func (m UiModel) renderMainContent() string {
 					if j == m.currentWordIdx && len(words) > 0 {
 						highlightedWords = append(highlightedWords, lipgloss.NewStyle().
 							Bold(true).
-							Background(brightYellowColor). // Bright yellow
-							Foreground(greyColor). // Dark gray
+							Background(brightYellowColor).
+							Foreground(greyColor).
 							Padding(0, 1).
 							Render(word))
 					} else {
@@ -626,8 +628,8 @@ func (m UiModel) renderMainContent() string {
 				hlLine := strings.Join(highlightedWords, " ")
 				// Apply line highlight
 				hlLine = lipgloss.NewStyle().
-					Background(darkGrayColor). // Darker gray background
-					Foreground(brightWhiteColor). // Bright white text
+					Background(darkGrayColor).
+					Foreground(brightWhiteColor).
 					Padding(0, 1).
 					Render(hlLine)
 				content.WriteString(hlLine + "\n")
@@ -651,8 +653,8 @@ func (m UiModel) renderMainContent() string {
 				word := m.vocabulary[i]
 				if i == m.currentVocabIdx {
 					content.WriteString(lipgloss.NewStyle().
-						Background(darkGrayColor). // Darker gray background
-						Foreground(brightWhiteColor). // Bright white text
+						Background(darkGrayColor).
+						Foreground(brightWhiteColor).
 						Padding(0, 1).
 						Render(word) + "\n")
 				} else {
