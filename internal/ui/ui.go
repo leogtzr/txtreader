@@ -526,16 +526,7 @@ func (m UiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.syncViewportOffset()
 	}
 
-	//return m, nil
-	// Opcional: Delega a viewport.Update para keys default como up/down/pgup si quieres soporte adicional
-	var cmd tea.Cmd
-	m.vp, cmd = m.vp.Update(msg)
-
-	// Si YOffset cambió (ej. por mouse), actualiza currentLine al centro visible
-	halfHeight := m.vp.Height / 2
-	m.currentLine = utils.Max(0, utils.Min(len(m.lines)-1, m.vp.YOffset+halfHeight))
-
-	return m, cmd
+	return m, nil
 }
 
 func (m *UiModel) syncViewportOffset() {
