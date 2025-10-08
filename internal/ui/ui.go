@@ -6,6 +6,7 @@ import (
 	"net/url"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"runtime"
 	"strconv"
 	"strings"
@@ -57,6 +58,7 @@ type UiModel struct {
 	sessionWordsRead      int     // Session words read
 	lastActionTime        time.Time
 	vp                    viewport.Model // Viewport para manejar scroll en el tab de texto
+	showHelpDialog        bool
 }
 
 const DefaultWPM = 250.0
@@ -101,6 +103,7 @@ const (
 	keyGotoLineDialog  = "g"
 	keyZero            = "0"
 	keyDollarSign      = "$"
+	keyHelp            = "?"
 )
 
 func InitialModel(filePath string) (UiModel, error) {
@@ -135,6 +138,7 @@ func InitialModel(filePath string) (UiModel, error) {
 		sessionReadingTime:   0,
 		sessionWordsRead:     0,
 		lastActionTime:       time.Now(),
+		showHelpDialog:       false,
 	}
 
 	m.filePath = filePath
@@ -225,6 +229,13 @@ func (m UiModel) Init() tea.Cmd {
 func (m UiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
+		if m.showHelpDialog {
+			switch msg.String() {
+			case keyEsc, keyHelp, keyEnter, keyCancel:
+				m.showHelpDialog = false
+			}
+			return m, nil
+		}
 		if m.showGotoLineDialog {
 			switch msg.String() {
 			case keyEsc:
@@ -357,6 +368,9 @@ func (m UiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		switch msg.String() {
+		case keyHelp:
+			m.showHelpDialog = true
+			return m, nil
 		case keyCancel, keyQuit:
 			// Save progress before quitting
 			m.totalReadingSeconds += m.sessionReadingTime
@@ -540,7 +554,7 @@ func (m UiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.width = msg.Width
 		m.height = msg.Height
 
-		contentHeight := m.height - 4 // Ajuste existente para tab bar + status
+		contentHeight := m.height - 5 // Ajuste existente para tab bar + status
 		if contentHeight < 1 {
 			contentHeight = 1
 		}
@@ -562,6 +576,9 @@ func (m *UiModel) syncViewportOffset() {
 }
 
 func (m UiModel) View() string {
+	if m.showHelpDialog {
+		return m.renderWithDialog(m.renderHelpDialog())
+	}
 	if m.showGotoLineDialog {
 		return m.renderWithDialog(m.renderGoToLineDialog())
 	}
@@ -616,8 +633,19 @@ func (m UiModel) renderMainContent() string {
 		Render(tabBar)
 	content.WriteString(tabBar + "\n")
 
+	// File label
+	fileName := filepath.Base(m.filePath)
+	fileLabel := lipgloss.NewStyle().
+		Foreground(cyanColor).
+		Background(darkGrayColor).
+		Padding(0, 1).
+		Width(m.width).
+		Align(lipgloss.Left).
+		Render(fmt.Sprintf("📄 %s", fileName))
+	content.WriteString(fileLabel + "\n")
+
 	// Content area
-	contentHeight := m.height - 4 // Adjusted for tab bar height (3) + status (1)
+	contentHeight := m.height - 5 // Adjusted for tab bar height (3) + status (1)
 	if contentHeight < 1 {
 		contentHeight = 1
 	}
@@ -1031,6 +1059,116 @@ func (m UiModel) renderWithDialog(dialog string) string {
 		dialog,
 	)
 	return background + "\n" + dialogCentered
+}
+
+func (m UiModel) renderHelpDialog() string {
+	dialogWidth := utils.Min(m.width-4, 70)
+
+	title := lipgloss.NewStyle().
+		Foreground(brightWhiteColor).
+		Background(blueColor).
+		Bold(true).
+		Align(lipgloss.Center).
+		Padding(0, 1).
+		Width(dialogWidth - 4).
+		Render("⌨️  ATAJOS DE TECLADO")
+
+	// Definir secciones de ayuda
+	sections := []struct {
+		title string
+		keys  [][]string
+	}{
+		{
+			title: "NAVEGACIÓN",
+			keys: [][]string{
+				{"j / ↓", "Línea siguiente"},
+				{"k / ↑", "Línea anterior"},
+				{"← / →", "Palabra anterior/siguiente"},
+				{"0", "Primera palabra de la línea"},
+				{"$", "Última palabra de la línea"},
+				{"g", "Ir a línea específica"},
+				{"PgUp/PgDn", "Página arriba/abajo"},
+			},
+		},
+		{
+			title: "TABS",
+			keys: [][]string{
+				{"1", "Tab Texto"},
+				{"2", "Tab Vocabulario"},
+				{"3", "Tab Notas"},
+				{"4", "Tab Estadísticas"},
+			},
+		},
+		{
+			title: "ACCIONES",
+			keys: [][]string{
+				{"w", "Agregar palabra al vocabulario"},
+				{"c", "Copiar palabra al portapapeles"},
+				{"n", "Crear nueva nota"},
+				{"o", "Abrir enlaces (RAE/GoodReads)"},
+				{"d", "Eliminar (vocabulario/nota)"},
+				{"s", "Guardar progreso"},
+			},
+		},
+		{
+			title: "GENERAL",
+			keys: [][]string{
+				{"?", "Mostrar esta ayuda"},
+				{"Esc", "Cerrar diálogos"},
+				{"q / Ctrl+C", "Salir"},
+			},
+		},
+	}
+
+	var helpContent strings.Builder
+
+	keyStyle := lipgloss.NewStyle().
+		Foreground(brightYellowColor).
+		Bold(true)
+
+	descStyle := lipgloss.NewStyle().
+		Foreground(lightGrayColor)
+
+	sectionTitleStyle := lipgloss.NewStyle().
+		Foreground(cyanColor).
+		Bold(true).
+		Underline(true).
+		MarginTop(1)
+
+	for _, section := range sections {
+		helpContent.WriteString(sectionTitleStyle.Render(section.title) + "\n")
+		for _, key := range section.keys {
+			line := fmt.Sprintf("  %s  %s",
+				keyStyle.Render(fmt.Sprintf("%-12s", key[0])),
+				descStyle.Render(key[1]))
+			helpContent.WriteString(line + "\n")
+		}
+	}
+
+	contentBox := lipgloss.NewStyle().
+		Width(dialogWidth - 4).
+		MaxHeight(m.height - 10).
+		Padding(1).
+		Render(helpContent.String())
+
+	closeHint := lipgloss.NewStyle().
+		Foreground(mediumGrayColor).
+		Italic(true).
+		Align(lipgloss.Center).
+		Width(dialogWidth - 4).
+		Render("Presiona Esc o ? para cerrar")
+
+	dialogContent := lipgloss.JoinVertical(lipgloss.Left, title, contentBox, closeHint)
+
+	dialog := lipgloss.NewStyle().
+		Width(dialogWidth).
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(cyanColor).
+		Padding(1).
+		Background(greyColor).
+		Render(dialogContent)
+
+	return dialog
 }
 
 func browserOpenURLCommand(osName, url string) *exec.Cmd {

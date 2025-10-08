@@ -6,15 +6,13 @@ import (
 )
 
 func Contains(words *[]string, word string) bool {
-	found := false
-	for _, v := range *words {
-		if v == word {
-			found = true
-			break
+	for _, w := range *words {
+		if w == word {
+			return true
 		}
 	}
 
-	return found
+	return false
 }
 
 func SanitizeWord(word string) string {
