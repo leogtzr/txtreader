@@ -59,6 +59,11 @@ type UiModel struct {
 	lastActionTime        time.Time
 	vp                    viewport.Model // Viewport para manejar scroll en el tab de texto
 	showHelpDialog        bool
+	showSearchDialog      bool
+	searchInput           string
+	searchResults         []int  // Índices de líneas que contienen el término
+	currentSearchIdx      int    // Índice actual en searchResults
+	searchTerm            string // Término de búsqueda actual
 }
 
 const DefaultWPM = 250.0
@@ -88,7 +93,7 @@ const (
 	keyVocabTab        = "2"
 	keyNotesTab        = "3"
 	keyStatsTab        = "4"
-	keyShowNoteDialog  = "n"
+	keyShowNoteDialog  = "ctrl+n"
 	keyEnter           = "enter"
 	keyBackspace       = "backspace"
 	keyEspace          = " "
@@ -104,6 +109,9 @@ const (
 	keyZero            = "0"
 	keyDollarSign      = "$"
 	keyHelp            = "?"
+	keySearch          = "/"
+	keyNextSearch      = "n"
+	keyPrevSearch      = "N"
 )
 
 func InitialModel(filePath string) (UiModel, error) {
@@ -139,6 +147,11 @@ func InitialModel(filePath string) (UiModel, error) {
 		sessionWordsRead:     0,
 		lastActionTime:       time.Now(),
 		showHelpDialog:       false,
+		showSearchDialog:     false,
+		searchInput:          "",
+		searchResults:        []int{},
+		currentSearchIdx:     -1,
+		searchTerm:           "",
 	}
 
 	m.filePath = filePath
@@ -236,6 +249,47 @@ func (m UiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return m, nil
 		}
+
+		// Manejo del diálogo de búsqueda
+		if m.showSearchDialog {
+			switch msg.String() {
+			case keyEsc:
+				m.showSearchDialog = false
+				m.searchInput = ""
+			case keyEnter:
+				if m.searchInput != "" {
+					// We have something in the input, perform the search...
+					m.searchTerm = strings.ToLower(m.searchInput)
+					m.searchResults = m.performSearch(m.searchTerm)
+
+					if len(m.searchResults) > 0 {
+						// Go to the first result
+						m.currentSearchIdx = 0
+						m.currentLine = m.searchResults[0]
+						m.currentWordIdx = 0
+						m.syncViewportOffset()
+					}
+				}
+				m.showSearchDialog = false
+				m.searchInput = ""
+			case keyBackspace:
+				if len(m.searchInput) > 0 {
+					m.searchInput = m.searchInput[:len(m.searchInput)-1]
+				}
+			case keyCancel:
+				m.showSearchDialog = false
+				m.searchInput = ""
+			default:
+				// Capture text input
+				if msg.Type == tea.KeyRunes && len(msg.Runes) > 0 {
+					for _, r := range msg.Runes {
+						m.searchInput += string(r)
+					}
+				}
+			}
+			return m, nil
+		}
+
 		if m.showGotoLineDialog {
 			switch msg.String() {
 			case keyEsc:
@@ -371,6 +425,33 @@ func (m UiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case keyHelp:
 			m.showHelpDialog = true
 			return m, nil
+		case keySearch:
+			if m.currentTab == 0 {
+				m.showSearchDialog = true
+				m.searchInput = ""
+			}
+			return m, nil
+		case keyNextSearch:
+			// Go to the next search result
+			if len(m.searchResults) > 0 {
+				m.currentSearchIdx = (m.currentSearchIdx + 1) % len(m.searchResults)
+				m.currentLine = m.searchResults[m.currentSearchIdx]
+				m.currentWordIdx = 0
+				m.syncViewportOffset()
+			}
+			return m, nil
+		case keyPrevSearch:
+			// Go to the previous search result
+			if len(m.searchResults) > 0 {
+				m.currentSearchIdx--
+				if m.currentSearchIdx < 0 {
+					m.currentSearchIdx = len(m.searchResults) - 1
+				}
+				m.currentLine = m.searchResults[m.currentSearchIdx]
+				m.currentWordIdx = 0
+				m.syncViewportOffset()
+			}
+			return m, nil
 		case keyCancel, keyQuit:
 			// Save progress before quitting
 			m.totalReadingSeconds += m.sessionReadingTime
@@ -436,7 +517,7 @@ func (m UiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						//m.currentLine--
 						m.currentLine = utils.Max(0, m.currentLine-1)
 						m.currentWordIdx = 0
-						m.syncViewportOffset() // Sincroniza
+						m.syncViewportOffset()
 					}
 				case keyLeft:
 					if len(palabras) > 0 {
@@ -578,6 +659,9 @@ func (m *UiModel) syncViewportOffset() {
 func (m UiModel) View() string {
 	if m.showHelpDialog {
 		return m.renderWithDialog(m.renderHelpDialog())
+	}
+	if m.showSearchDialog {
+		return m.renderWithDialog(m.renderSearchDialog())
 	}
 	if m.showGotoLineDialog {
 		return m.renderWithDialog(m.renderGoToLineDialog())
@@ -811,6 +895,14 @@ func (m UiModel) renderMainContent() string {
 		percent = float64(m.currentLine) / float64(total-1) * 100
 	}
 	lineInfo := fmt.Sprintf("Línea: %d/%d (%.4f%%)", m.currentLine+1, total, percent)
+
+	// Mostrar información de búsqueda si hay resultados activos
+	searchInfo := ""
+	if len(m.searchResults) > 0 {
+		searchInfo = fmt.Sprintf(" | Búsqueda: %d/%d resultados para '%s'",
+			m.currentSearchIdx+1, len(m.searchResults), m.searchTerm)
+	}
+
 	selInfo := ""
 	if m.currentTab == 0 && m.selectedWord != "" {
 		selInfo = fmt.Sprintf(" | Seleccionada: %s", m.selectedWord)
@@ -822,7 +914,8 @@ func (m UiModel) renderMainContent() string {
 		selInfo = fmt.Sprintf(" | Nota: %d/%d", m.currentNoteIdx+1, len(m.notes))
 	}
 	timeLeft := m.remainingTimeString()
-	status := lineInfo + selInfo + " | Tiempo restante: " + timeLeft
+	status := lineInfo + searchInfo + selInfo + " | Tiempo restante: " + timeLeft
+	//status := lineInfo + selInfo + " | Tiempo restante: " + timeLeft
 	statusStyle := lipgloss.NewStyle().
 		Padding(0, 1).
 		Height(1).
@@ -1091,6 +1184,14 @@ func (m UiModel) renderHelpDialog() string {
 			},
 		},
 		{
+			title: "BÚSQUEDA",
+			keys: [][]string{
+				{"/", "Abrir búsqueda"},
+				{"n", "Siguiente resultado"},
+				{"N (Shift+n)", "Resultado anterior"},
+			},
+		},
+		{
 			title: "TABS",
 			keys: [][]string{
 				{"1", "Tab Texto"},
@@ -1182,4 +1283,89 @@ func browserOpenURLCommand(osName, url string) *exec.Cmd {
 	default:
 		return nil
 	}
+}
+
+func (m *UiModel) performSearch(term string) []int {
+	var results []int
+	startLine := m.currentLine
+
+	// Buscar desde la línea actual hasta el final
+	for i := startLine; i < len(m.lines); i++ {
+		if strings.Contains(strings.ToLower(m.lines[i]), term) {
+			results = append(results, i)
+		}
+	}
+
+	// Buscar desde el inicio hasta la línea actual (búsqueda circular)
+	for i := 0; i < startLine; i++ {
+		if strings.Contains(strings.ToLower(m.lines[i]), term) {
+			results = append(results, i)
+		}
+	}
+
+	return results
+}
+
+func (m UiModel) renderSearchDialog() string {
+	dialogWidth := utils.Min(m.width*2/3, 60)
+
+	title := lipgloss.NewStyle().
+		Foreground(brightWhiteColor).
+		Background(blueColor).
+		Bold(true).
+		Align(lipgloss.Center).
+		Padding(0, 1).
+		Width(dialogWidth - 4).
+		Render("🔍 BUSCAR")
+
+	// Input box
+	inputText := m.searchInput
+	if inputText == "" {
+		inputText = "Escribe tu búsqueda..."
+	}
+
+	inputBox := lipgloss.NewStyle().
+		Width(dialogWidth-6).
+		Border(lipgloss.NormalBorder()).
+		BorderForeground(royalBlueColor).
+		Padding(0, 1).
+		Foreground(brightWhiteColor).
+		Render(inputText)
+
+	// Buttons
+	searchButton := lipgloss.NewStyle().
+		Foreground(brightWhiteColor).
+		Background(greenColor).
+		Padding(0, 2).
+		Margin(0, 1).
+		Render("Buscar (Enter)")
+
+	cancelButton := lipgloss.NewStyle().
+		Foreground(brightWhiteColor).
+		Background(redColor).
+		Padding(0, 2).
+		Margin(0, 1).
+		Render("Cancelar (Esc)")
+
+	buttons := lipgloss.JoinHorizontal(lipgloss.Center, searchButton, cancelButton)
+
+	// Hint
+	hint := lipgloss.NewStyle().
+		Foreground(mediumGrayColor).
+		Italic(true).
+		Align(lipgloss.Center).
+		Width(dialogWidth - 4).
+		Render(fmt.Sprintf("Usa '%s' para siguiente resultado, '%s' para anterior", keyNextSearch, keyPrevSearch))
+
+	dialogContent := lipgloss.JoinVertical(lipgloss.Left, title, "", inputBox, "", buttons, "", hint)
+
+	dialog := lipgloss.NewStyle().
+		Width(dialogWidth).
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(cyanColor).
+		Padding(1).
+		Background(greyColor).
+		Render(dialogContent)
+
+	return dialog
 }
