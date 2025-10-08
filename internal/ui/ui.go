@@ -99,6 +99,8 @@ const (
 	keyAddToVocabulary = "w"
 	keyCopyToClipboard = "c"
 	keyGotoLineDialog  = "g"
+	keyZero            = "0"
+	keyDollarSign      = "$"
 )
 
 func InitialModel(filePath string) (UiModel, error) {
@@ -448,11 +450,11 @@ func (m UiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 							fmt.Printf("Error copying word: %v\n", err)
 						}
 					}
-				case "0":
+				case keyZero:
 					if len(palabras) > 0 {
 						m.currentWordIdx = 0
 					}
-				case "$":
+				case keyDollarSign:
 					if len(palabras) > 0 {
 						m.currentWordIdx = len(palabras) - 1
 					}
