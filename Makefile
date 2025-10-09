@@ -24,3 +24,6 @@ cover:
 
 run:
 	./txtreader
+
+lint:
+	golangci-lint run ./...

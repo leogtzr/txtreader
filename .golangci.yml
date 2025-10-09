@@ -1,0 +1,21 @@
+run:
+  timeout: 2m
+  tests: true
+
+linters:
+  enable:
+    - govet
+    - staticcheck
+    - errcheck
+    - ineffassign
+    - gosimple
+    - unused
+    - gofmt
+    - goimports
+    - gocyclo
+    - misspell
+
+issues:
+  exclude-use-default: false
+  exclude:
+    - "error return value not checked.*(Close|Write|Flush)"
