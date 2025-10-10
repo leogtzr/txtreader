@@ -64,6 +64,7 @@ type UiModel struct {
 	searchResults         []int  // Índices de líneas que contienen el término
 	currentSearchIdx      int    // Índice actual en searchResults
 	searchTerm            string // Término de búsqueda actual
+	vocabVP               viewport.Model
 }
 
 const DefaultWPM = 250.0
@@ -204,6 +205,15 @@ func InitialModel(filePath string) (UiModel, error) {
 	m.vp.KeyMap.Up.SetEnabled(false)
 	m.vp.KeyMap.Down.SetEnabled(false)
 
+	m.vocabVP = viewport.New(0, 0)
+	m.vocabVP.MouseWheelEnabled = true
+	m.vocabVP.KeyMap = viewport.DefaultKeyMap()
+	m.vocabVP.KeyMap.Up.SetEnabled(false)
+	m.vocabVP.KeyMap.Down.SetEnabled(false)
+
+	m.updateVocabContent()
+	m.syncVocabOffset() // Center initially
+
 	m.vp.SetContent(strings.Join(m.lines, "\n"))
 
 	return m, nil
@@ -250,7 +260,6 @@ func (m UiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 
-		// Manejo del diálogo de búsqueda
 		if m.showSearchDialog {
 			switch msg.String() {
 			case keyEsc:
@@ -514,7 +523,6 @@ func (m UiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				case keyPrevLine, "up":
 					if m.currentLine > 0 {
 						m.lastActionTime = time.Now() // Update time but don't add to session (backtracking)
-						//m.currentLine--
 						m.currentLine = utils.Max(0, m.currentLine-1)
 						m.currentWordIdx = 0
 						m.syncViewportOffset()
@@ -555,22 +563,26 @@ func (m UiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					}
 				}
 
-				// Delega a viewport.Update para keys default como pgup/pgdn (no para "j/k" ya que los manejas manualmente)
+				// Delegates to viewport.Update for default keys like pgup/pgdn (not for "j/k" since you handle them manually)
 				var cmd tea.Cmd
 				m.vp, cmd = m.vp.Update(msg)
-				// Actualiza currentLine si YOffset cambió (ej. por pgup)
+				// Updates currentLine to the visible center if YOffset changed (e.g., by pgup)
 				halfHeight := m.vp.Height / 2
 				m.currentLine = utils.Max(0, utils.Min(len(m.lines)-1, m.vp.YOffset+halfHeight))
 				return m, cmd
 			} else if m.currentTab == 1 {
 				switch msg.String() {
-				case keyNextLine:
+				case keyNextLine, "down":
 					if m.currentVocabIdx < len(m.vocabulary)-1 {
 						m.currentVocabIdx++
+						m.updateVocabContent() // Update highlight
+						m.syncVocabOffset()    // Center selection
 					}
-				case keyPrevLine:
+				case keyPrevLine, "up":
 					if m.currentVocabIdx > 0 {
 						m.currentVocabIdx--
+						m.updateVocabContent() // Update highlight
+						m.syncVocabOffset()    // Center selection
 					}
 				case keyDelete:
 					// Delete current vocabulary word
@@ -583,7 +595,19 @@ func (m UiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						if len(m.vocabulary) == 0 {
 							m.currentVocabIdx = 0
 						}
+
+						m.updateVocabContent() // Rebuilds content after a change in vocab
+						m.syncVocabOffset()    // Make sure is visible
 					}
+
+				default:
+					var cmd tea.Cmd
+					m.vocabVP, cmd = m.vocabVP.Update(msg)
+					// Updates selection to the visible center after scroll
+					halfHeight := m.vocabVP.Height / 2
+					m.currentVocabIdx = utils.Max(0, utils.Min(len(m.vocabulary)-1, m.vocabVP.YOffset+halfHeight))
+					m.updateVocabContent() // Updates highlight based on new idx
+					return m, cmd
 				}
 			} else if m.currentTab == 2 {
 				switch msg.String() {
@@ -622,12 +646,20 @@ func (m UiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case tea.MouseMsg:
 		if m.currentTab == 0 {
-			// Delega a viewport para wheel up/down
+			// Delegates to viewport for wheel up/down
 			var cmd tea.Cmd
 			m.vp, cmd = m.vp.Update(msg)
-			// Actualiza currentLine al centro visible si YOffset cambió
+			// Updates currentLine to the visible center if YOffset changed (e.g., by pgup)
 			halfHeight := m.vp.Height / 2
 			m.currentLine = utils.Max(0, utils.Min(len(m.lines)-1, m.vp.YOffset+halfHeight))
+			return m, cmd
+		} else if m.currentTab == 1 {
+			var cmd tea.Cmd
+			m.vocabVP, cmd = m.vocabVP.Update(msg)
+			// Updates selection to the visible center after scroll
+			halfHeight := m.vocabVP.Height / 2
+			m.currentVocabIdx = utils.Max(0, utils.Min(len(m.vocabulary)-1, m.vocabVP.YOffset+halfHeight))
+			m.updateVocabContent() // Updates highlight based on new idx
 			return m, cmd
 		}
 
@@ -635,7 +667,7 @@ func (m UiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.width = msg.Width
 		m.height = msg.Height
 
-		contentHeight := m.height - 5 // Ajuste existente para tab bar + status
+		contentHeight := m.height - 5 // tab bar + status
 		if contentHeight < 1 {
 			contentHeight = 1
 		}
@@ -643,7 +675,18 @@ func (m UiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.vp.Width = m.width - 2
 		m.vp.Height = contentHeight
 		// Sincroniza YOffset inicial para centrar currentLine (opcional, ver Paso 5)
+		// Syncs YOffset to center currentLine (optional, see Step 5)
 		m.syncViewportOffset()
+
+		m.syncVocabOffset()    // Asegura que la selección esté centrada después de resize
+		m.updateVocabContent() // Opcional, si width cambia y padding afecta
+
+		// Agrega esto para el viewport de vocabulario
+		m.vocabVP.Width = m.width - 2
+		m.vocabVP.Height = contentHeight
+
+		m.syncVocabOffset()    // Asegura que la selección esté centrada después de resize
+		m.updateVocabContent() // Refresca el contenido (aplica estilos con el nuevo tamaño)
 	}
 
 	return m, nil
@@ -778,22 +821,7 @@ func (m UiModel) renderMainContent() string {
 				Align(lipgloss.Right).
 				Render("No Vocab\n"))
 		} else {
-			viewStart := utils.Max(0, m.currentVocabIdx-contentHeight/2)
-			viewEnd := utils.Min(len(m.vocabulary), viewStart+contentHeight)
-			for i := viewStart; i < viewEnd; i++ {
-				word := m.vocabulary[i]
-				if i == m.currentVocabIdx {
-					content.WriteString(lipgloss.NewStyle().
-						Background(darkGrayColor).
-						Foreground(brightWhiteColor).
-						Padding(0, 1).
-						Render(word) + "\n")
-				} else {
-					content.WriteString(lipgloss.NewStyle().
-						Foreground(lightGrayColor). // Light gray
-						Render(word) + "\n")
-				}
-			}
+			content.WriteString(m.vocabVP.View() + "\n")
 		}
 	} else if m.currentTab == 2 {
 		// Notas tab: show notes with navigation and borders
@@ -896,7 +924,7 @@ func (m UiModel) renderMainContent() string {
 	}
 	lineInfo := fmt.Sprintf("Línea: %d/%d (%.4f%%)", m.currentLine+1, total, percent)
 
-	// Mostrar información de búsqueda si hay resultados activos
+	// Show search info if there are active results
 	searchInfo := ""
 	if len(m.searchResults) > 0 {
 		searchInfo = fmt.Sprintf(" | Búsqueda: %d/%d resultados para '%s'",
@@ -1289,14 +1317,14 @@ func (m *UiModel) performSearch(term string) []int {
 	var results []int
 	startLine := m.currentLine
 
-	// Buscar desde la línea actual hasta el final
+	// Search from current line to the end
 	for i := startLine; i < len(m.lines); i++ {
 		if strings.Contains(strings.ToLower(m.lines[i]), term) {
 			results = append(results, i)
 		}
 	}
 
-	// Buscar desde el inicio hasta la línea actual (búsqueda circular)
+	// Search from start to current line (circular search)
 	for i := 0; i < startLine; i++ {
 		if strings.Contains(strings.ToLower(m.lines[i]), term) {
 			results = append(results, i)
@@ -1368,4 +1396,26 @@ func (m UiModel) renderSearchDialog() string {
 		Render(dialogContent)
 
 	return dialog
+}
+
+func (m *UiModel) updateVocabContent() {
+	var lines []string
+	for i, word := range m.vocabulary {
+		style := lipgloss.NewStyle().Foreground(lightGrayColor)
+		if i == m.currentVocabIdx {
+			style = style.
+				Background(darkGrayColor).
+				Foreground(brightWhiteColor).
+				Padding(0, 1)
+		}
+		lines = append(lines, style.Render(word))
+	}
+	m.vocabVP.SetContent(strings.Join(lines, "\n"))
+}
+
+func (m *UiModel) syncVocabOffset() {
+	halfHeight := m.vocabVP.Height / 2
+	newOffset := utils.Max(0, m.currentVocabIdx-halfHeight)
+	maxOffset := utils.Max(0, len(m.vocabulary)-m.vocabVP.Height)
+	m.vocabVP.YOffset = utils.Min(newOffset, maxOffset)
 }
