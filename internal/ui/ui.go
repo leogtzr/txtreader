@@ -17,6 +17,7 @@ import (
 	"txtreader/internal/utils"
 
 	"github.com/atotto/clipboard"
+	"github.com/charmbracelet/bubbles/textarea"
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
@@ -40,15 +41,14 @@ type UiModel struct {
 	notes                 []string
 	currentNoteIdx        int // Track selected note
 	showNoteDialog        bool
-	noteInput             []string // Multiline note input
-	showLinksDialog       bool     // Track links widget visibility
-	currentLinkIdx        int      // Track selected link
-	showDeleteNoteDialog  bool     // Track delete note confirmation dialog
-	deleteNoteConfirmIdx  int      // Track selected option in delete confirmation (0=No, 1=Yes)
-	totalLines            int      // Total number of lines
-	totalWords            int      // Total number of words
-	longestLine           string   // The longest line content
-	longestLineLength     int      // Length of the longest line
+	showLinksDialog       bool   // Track links widget visibility
+	currentLinkIdx        int    // Track selected link
+	showDeleteNoteDialog  bool   // Track delete note confirmation dialog
+	deleteNoteConfirmIdx  int    // Track selected option in delete confirmation (0=No, 1=Yes)
+	totalLines            int    // Total number of lines
+	totalWords            int    // Total number of words
+	longestLine           string // The longest line content
+	longestLineLength     int    // Length of the longest line
 	longestWord           string
 	topWords              []stats.WordCount
 	cumulativeWords       []int   // Cumulative words up to each line
@@ -65,6 +65,7 @@ type UiModel struct {
 	currentSearchIdx      int    // Índice actual en searchResults
 	searchTerm            string // Término de búsqueda actual
 	vocabVP               viewport.Model
+	noteTA                textarea.Model
 }
 
 const DefaultWPM = 250.0
@@ -131,7 +132,6 @@ func InitialModel(filePath string) (UiModel, error) {
 		vocabulary:           []string{},
 		notes:                []string{},
 		showNoteDialog:       false,
-		noteInput:            []string{""},
 		showLinksDialog:      false,
 		showDeleteNoteDialog: false,
 		deleteNoteConfirmIdx: 0, // Default to "No"
@@ -329,40 +329,22 @@ func (m UiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			switch msg.String() {
 			case keyEsc:
 				m.showNoteDialog = false
-				m.noteInput = []string{""} // Reset note input
-			case keyEnter:
-				// Add new line to note input
-				m.noteInput = append(m.noteInput, "")
-			case keyBackspace:
-				currentLine := len(m.noteInput) - 1
-				if len(m.noteInput[currentLine]) > 0 {
-					runes := []rune(m.noteInput[currentLine])
-					m.noteInput[currentLine] = string(runes[:len(runes)-1]) // Elimina la última runa
-				} else if currentLine > 0 {
-					m.noteInput = m.noteInput[:currentLine]
-				}
+				m.noteTA.Reset() // Clear input
 			case keyControlSave:
-				// Save note
-				note := strings.Join(m.noteInput, "\n")
+				note := strings.TrimSpace(m.noteTA.Value())
 				if note != "" {
 					m.notes = append(m.notes, note)
 				}
 				m.showNoteDialog = false
-				m.noteInput = []string{""} // Reset note input
+				m.noteTA.Reset()
 			case keyCancel:
-				// Cancel note
 				m.showNoteDialog = false
-				m.noteInput = []string{""} // Reset note input
-			case keyEspace:
-				currentLine := len(m.noteInput) - 1
-				m.noteInput[currentLine] += " "
+				m.noteTA.Reset()
 			default:
-				if msg.Type == tea.KeyRunes && len(msg.Runes) > 0 {
-					currentLine := len(m.noteInput) - 1
-					for _, r := range msg.Runes {
-						m.noteInput[currentLine] += string(r)
-					}
-				}
+				// Delegates all keys to the textarea (includes editing, navigation, etc.)
+				var cmd tea.Cmd
+				m.noteTA, cmd = m.noteTA.Update(msg)
+				return m, cmd
 			}
 			return m, nil
 		}
@@ -493,7 +475,12 @@ func (m UiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.currentTab = 3
 		case keyShowNoteDialog:
 			m.showNoteDialog = true
-			m.noteInput = []string{""} // Initialize note input
+			m.noteTA = textarea.New()
+			m.noteTA.Placeholder = "Escribe tu nota aquí..."
+			m.noteTA.Focus()
+			m.noteTA.SetWidth(60)  // Adjusts based on dialogWidth
+			m.noteTA.SetHeight(10) // Fixed height for the input
+			m.noteTA.CharLimit = 0 // No limit
 		case keyGotoLineDialog:
 			if m.currentTab == 0 {
 				m.showGotoLineDialog = true
@@ -1003,6 +990,9 @@ func (m UiModel) renderNoteDialog() string {
 		dialogWidth = 80
 	}
 
+	// Updates width dynamically (if resize during dialog, but for simplicity, set on open)
+	m.noteTA.SetWidth(dialogWidth - 4) // Actualiza si es necesario
+
 	title := lipgloss.NewStyle().
 		Foreground(brightWhiteColor).
 		Align(lipgloss.Center).
@@ -1010,14 +1000,13 @@ func (m UiModel) renderNoteDialog() string {
 		Width(dialogWidth - 4).
 		Render("Agregar nota")
 
-	noteText := strings.Join(m.noteInput, "\n")
 	inputBox := lipgloss.NewStyle().
 		Width(dialogWidth - 4).
 		Height(10).
 		Border(lipgloss.NormalBorder()).
 		BorderForeground(royalBlueColor).
 		Padding(1).
-		Render(noteText)
+		Render(m.noteTA.View()) // Use the  View() of the textarea
 
 	saveButton := lipgloss.NewStyle().
 		Foreground(brightWhiteColor).
