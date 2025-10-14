@@ -21,6 +21,9 @@ import (
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+
+	"github.com/taylorskalyo/goreader/epub"
+	"golang.org/x/net/html"
 )
 
 type UiModel struct {
@@ -156,18 +159,81 @@ func InitialModel(filePath string) (UiModel, error) {
 	}
 
 	m.filePath = filePath
-	file, err := os.Open(m.filePath)
-	if err != nil {
-		return UiModel{}, err
+
+	var fullText string
+	if strings.HasSuffix(strings.ToLower(filePath), ".epub") {
+		rc, err := epub.OpenReader(filePath)
+		if err != nil {
+			return UiModel{}, fmt.Errorf("error opening EPUB: %v", err)
+		}
+		defer rc.Close()
+
+		if len(rc.Rootfiles) == 0 {
+			return UiModel{}, fmt.Errorf("no rootfiles found in EPUB")
+		}
+		book := rc.Rootfiles[0]
+
+		var textBuilder strings.Builder
+		for _, itemref := range book.Spine.Itemrefs {
+			var item *epub.Item
+			for _, manifestItem := range book.Manifest.Items {
+				if manifestItem.ID == itemref.IDREF {
+					item = &manifestItem
+					break
+				}
+			}
+			if item == nil {
+				continue
+			}
+			reader, err := item.Open()
+			if err != nil {
+				continue
+			}
+			doc, err := html.Parse(reader)
+			if err != nil {
+				reader.Close()
+				continue
+			}
+			reader.Close()
+
+			// Extract text from HTML nodes
+			var extractText func(*html.Node)
+			extractText = func(n *html.Node) {
+				if n.Type == html.TextNode {
+					trimmed := strings.TrimSpace(n.Data)
+					if trimmed != "" {
+						textBuilder.WriteString(trimmed)
+						textBuilder.WriteString("\n")
+					}
+				}
+				for c := n.FirstChild; c != nil; c = c.NextSibling {
+					extractText(c)
+				}
+			}
+			extractText(doc)
+		}
+
+		fullText = textBuilder.String()
+	} else {
+		// Plain text
+		file, err := os.Open(filePath)
+		if err != nil {
+			return UiModel{}, err
+		}
+		defer file.Close()
+		scanner := bufio.NewScanner(file)
+		var textBuilder strings.Builder
+		for scanner.Scan() {
+			textBuilder.WriteString(scanner.Text())
+			textBuilder.WriteString("\n")
+		}
+		if err := scanner.Err(); err != nil {
+			return UiModel{}, err
+		}
+		fullText = textBuilder.String()
 	}
-	defer file.Close()
-	scanner := bufio.NewScanner(file)
-	for scanner.Scan() {
-		m.lines = append(m.lines, scanner.Text())
-	}
-	if err := scanner.Err(); err != nil {
-		return UiModel{}, err
-	}
+
+	m.lines = strings.Split(fullText, "\n")
 
 	// Compute cumulative words
 	m.cumulativeWords = make([]int, len(m.lines)+1)
@@ -260,6 +326,7 @@ func (m UiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 
+		// Manejo del diálogo de búsqueda
 		if m.showSearchDialog {
 			switch msg.String() {
 			case keyEsc:
@@ -553,7 +620,7 @@ func (m UiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				// Delegates to viewport.Update for default keys like pgup/pgdn (not for "j/k" since you handle them manually)
 				var cmd tea.Cmd
 				m.vp, cmd = m.vp.Update(msg)
-				// Updates currentLine to the visible center if YOffset changed (e.g., by pgup)
+				// Actualiza currentLine si YOffset cambió (ej. por pgup)
 				halfHeight := m.vp.Height / 2
 				m.currentLine = utils.Max(0, utils.Min(len(m.lines)-1, m.vp.YOffset+halfHeight))
 				return m, cmd
@@ -562,14 +629,14 @@ func (m UiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				case keyNextLine, "down":
 					if m.currentVocabIdx < len(m.vocabulary)-1 {
 						m.currentVocabIdx++
-						m.updateVocabContent() // Update highlight
-						m.syncVocabOffset()    // Center selection
+						m.updateVocabContent() // Actualiza highlight
+						m.syncVocabOffset()    // Centra la selección
 					}
 				case keyPrevLine, "up":
 					if m.currentVocabIdx > 0 {
 						m.currentVocabIdx--
-						m.updateVocabContent() // Update highlight
-						m.syncVocabOffset()    // Center selection
+						m.updateVocabContent() // Actualiza highlight
+						m.syncVocabOffset()    // Centra la selección
 					}
 				case keyDelete:
 					// Delete current vocabulary word
@@ -583,17 +650,17 @@ func (m UiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 							m.currentVocabIdx = 0
 						}
 
-						m.updateVocabContent() // Rebuilds content after a change in vocab
-						m.syncVocabOffset()    // Make sure is visible
+						m.updateVocabContent() // Reconstruye contenido después de cambio en vocab
+						m.syncVocabOffset()    // Asegura visibilidad
 					}
 
 				default:
 					var cmd tea.Cmd
 					m.vocabVP, cmd = m.vocabVP.Update(msg)
-					// Updates selection to the visible center after scroll
+					// Actualiza selección al centro visible después de scroll
 					halfHeight := m.vocabVP.Height / 2
 					m.currentVocabIdx = utils.Max(0, utils.Min(len(m.vocabulary)-1, m.vocabVP.YOffset+halfHeight))
-					m.updateVocabContent() // Updates highlight based on new idx
+					m.updateVocabContent() // Actualiza highlight basado en nuevo idx
 					return m, cmd
 				}
 			} else if m.currentTab == 2 {
@@ -633,20 +700,19 @@ func (m UiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case tea.MouseMsg:
 		if m.currentTab == 0 {
-			// Delegates to viewport for wheel up/down
+			// Delega a viewport para wheel up/down
 			var cmd tea.Cmd
 			m.vp, cmd = m.vp.Update(msg)
-			// Updates currentLine to the visible center if YOffset changed (e.g., by pgup)
+			// Actualiza currentLine al centro visible si YOffset cambió
 			halfHeight := m.vp.Height / 2
 			m.currentLine = utils.Max(0, utils.Min(len(m.lines)-1, m.vp.YOffset+halfHeight))
 			return m, cmd
 		} else if m.currentTab == 1 {
 			var cmd tea.Cmd
 			m.vocabVP, cmd = m.vocabVP.Update(msg)
-			// Updates selection to the visible center after scroll
 			halfHeight := m.vocabVP.Height / 2
 			m.currentVocabIdx = utils.Max(0, utils.Min(len(m.vocabulary)-1, m.vocabVP.YOffset+halfHeight))
-			m.updateVocabContent() // Updates highlight based on new idx
+			m.updateVocabContent() // Actualiza highlight
 			return m, cmd
 		}
 
@@ -654,26 +720,20 @@ func (m UiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.width = msg.Width
 		m.height = msg.Height
 
-		contentHeight := m.height - 5 // tab bar + status
+		contentHeight := m.height - 5 // Ajuste existente para tab bar + status
 		if contentHeight < 1 {
 			contentHeight = 1
 		}
 		// 2 for borders/padding if any
 		m.vp.Width = m.width - 2
 		m.vp.Height = contentHeight
-		// Sincroniza YOffset inicial para centrar currentLine (opcional, ver Paso 5)
-		// Syncs YOffset to center currentLine (optional, see Step 5)
 		m.syncViewportOffset()
 
-		m.syncVocabOffset()    // Asegura que la selección esté centrada después de resize
-		m.updateVocabContent() // Opcional, si width cambia y padding afecta
-
-		// Agrega esto para el viewport de vocabulario
 		m.vocabVP.Width = m.width - 2
 		m.vocabVP.Height = contentHeight
 
 		m.syncVocabOffset()    // Asegura que la selección esté centrada después de resize
-		m.updateVocabContent() // Refresca el contenido (aplica estilos con el nuevo tamaño)
+		m.updateVocabContent() // Refresca el contenido (aplica estilos con nuevo tamaño)
 	}
 
 	return m, nil
@@ -854,7 +914,7 @@ func (m UiModel) renderMainContent() string {
 					Padding(0, 1)
 				if i == m.currentNoteIdx {
 					noteStyle = noteStyle.
-						Background(greyColor). // Darker gray background
+						Background(greyColor).       // Darker gray background
 						Foreground(brightWhiteColor) // Bright white text
 				} else {
 					noteStyle = noteStyle.
@@ -896,7 +956,7 @@ func (m UiModel) renderMainContent() string {
 		statsText := strings.Join(statsLines, "\n")
 		statsStyle := lipgloss.NewStyle().
 			Foreground(brightWhiteColor). // Bright white
-			Background(darkGrayColor). // Darker gray
+			Background(darkGrayColor).    // Darker gray
 			Padding(1, 2).
 			Border(lipgloss.RoundedBorder(), true).
 			BorderForeground(cyanColor) // Cyan border
@@ -911,7 +971,7 @@ func (m UiModel) renderMainContent() string {
 	}
 	lineInfo := fmt.Sprintf("Línea: %d/%d (%.4f%%)", m.currentLine+1, total, percent)
 
-	// Show search info if there are active results
+	// Mostrar información de búsqueda si hay resultados activos
 	searchInfo := ""
 	if len(m.searchResults) > 0 {
 		searchInfo = fmt.Sprintf(" | Búsqueda: %d/%d resultados para '%s'",
@@ -1006,7 +1066,7 @@ func (m UiModel) renderNoteDialog() string {
 		Border(lipgloss.NormalBorder()).
 		BorderForeground(royalBlueColor).
 		Padding(1).
-		Render(m.noteTA.View()) // Use the  View() of the textarea
+		Render(m.noteTA.View()) // Use the View() of the textarea
 
 	saveButton := lipgloss.NewStyle().
 		Foreground(brightWhiteColor).
@@ -1306,14 +1366,14 @@ func (m *UiModel) performSearch(term string) []int {
 	var results []int
 	startLine := m.currentLine
 
-	// Search from current line to the end
+	// Buscar desde la línea actual hasta el final
 	for i := startLine; i < len(m.lines); i++ {
 		if strings.Contains(strings.ToLower(m.lines[i]), term) {
 			results = append(results, i)
 		}
 	}
 
-	// Search from start to current line (circular search)
+	// Buscar desde el inicio hasta la línea actual (búsqueda circular)
 	for i := 0; i < startLine; i++ {
 		if strings.Contains(strings.ToLower(m.lines[i]), term) {
 			results = append(results, i)
