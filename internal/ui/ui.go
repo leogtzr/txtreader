@@ -89,34 +89,35 @@ const (
 )
 
 const (
-	keyQuit            = "q"
-	keySave            = "s"
-	keyNextLine        = "j"
-	keyPrevLine        = "k"
-	keyEsc             = "esc"
-	keyMainTextTab     = "1"
-	keyVocabTab        = "2"
-	keyNotesTab        = "3"
-	keyStatsTab        = "4"
-	keyShowNoteDialog  = "ctrl+n"
-	keyEnter           = "enter"
-	keyBackspace       = "backspace"
-	keyEspace          = " "
-	keyCancel          = "ctrl+c"
-	keyDelete          = "d"
-	keyOpenLinksDialog = "o"
-	keyControlSave     = "ctrl+s"
-	keyLeft            = "left"
-	keyRight           = "right"
-	keyAddToVocabulary = "w"
-	keyCopyToClipboard = "c"
-	keyGotoLineDialog  = "g"
-	keyZero            = "0"
-	keyDollarSign      = "$"
-	keyHelp            = "?"
-	keySearch          = "/"
-	keyNextSearch      = "n"
-	keyPrevSearch      = "N"
+	keyQuit                     = "q"
+	keySave                     = "s"
+	keyNextLine                 = "j"
+	keyPrevLine                 = "k"
+	keyEsc                      = "esc"
+	keyMainTextTab              = "1"
+	keyVocabTab                 = "2"
+	keyNotesTab                 = "3"
+	keyStatsTab                 = "4"
+	keyShowNoteDialog           = "ctrl+n"
+	keyEnter                    = "enter"
+	keyBackspace                = "backspace"
+	keyEspace                   = " "
+	keyCancel                   = "ctrl+c"
+	keyDelete                   = "d"
+	keyOpenLinksDialog          = "o"
+	keyControlSave              = "ctrl+s"
+	keyLeft                     = "left"
+	keyRight                    = "right"
+	keyAddToVocabulary          = "w"
+	keyCopyToClipboard          = "c"
+	keyCopyWholeLineToClipboard = "C"
+	keyGotoLineDialog           = "g"
+	keyZero                     = "0"
+	keyDollarSign               = "$"
+	keyHelp                     = "?"
+	keySearch                   = "/"
+	keyNextSearch               = "n"
+	keyPrevSearch               = "N"
 )
 
 func InitialModel(filePath string) (UiModel, error) {
@@ -607,6 +608,13 @@ func (m UiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 							fmt.Printf("Error copying word: %v\n", err)
 						}
 					}
+
+				case keyCopyWholeLineToClipboard:
+					lineText := m.lines[m.currentLine]
+					err := clipboard.WriteAll(lineText)
+					if err != nil {
+						fmt.Printf("Error copying line: %v\n", err)
+					}
 				case keyZero:
 					if len(palabras) > 0 {
 						m.currentWordIdx = 0
@@ -914,7 +922,7 @@ func (m UiModel) renderMainContent() string {
 					Padding(0, 1)
 				if i == m.currentNoteIdx {
 					noteStyle = noteStyle.
-						Background(greyColor).       // Darker gray background
+						Background(greyColor). // Darker gray background
 						Foreground(brightWhiteColor) // Bright white text
 				} else {
 					noteStyle = noteStyle.
@@ -956,7 +964,7 @@ func (m UiModel) renderMainContent() string {
 		statsText := strings.Join(statsLines, "\n")
 		statsStyle := lipgloss.NewStyle().
 			Foreground(brightWhiteColor). // Bright white
-			Background(darkGrayColor).    // Darker gray
+			Background(darkGrayColor). // Darker gray
 			Padding(1, 2).
 			Border(lipgloss.RoundedBorder(), true).
 			BorderForeground(cyanColor) // Cyan border
