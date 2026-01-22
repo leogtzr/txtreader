@@ -422,7 +422,7 @@ func (m UiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.showLinksDialog = false
 				m.currentLinkIdx = 0
 			case keyNextLine, "down":
-				if m.currentLinkIdx < 1 { // Only two items: GoodReads, RAE
+				if m.currentLinkIdx < 2 { // Only two items: GoodReads, RAE
 					m.currentLinkIdx++
 				}
 			case keyPrevLine, "up":
@@ -431,7 +431,11 @@ func (m UiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 			case keyEnter:
 				// Open the selected link in the default browser
-				links := []string{"https://dle.rae.es/%s", "https://www.goodreads.com/search?q=%s"}
+				links := []string{
+					"https://dle.rae.es/%s",
+					"https://www.goodreads.com/search?q=%s",
+					"https://translate.google.com/?sl=en&tl=es&text=%s&op=translate",
+				}
 				if m.currentLinkIdx >= 0 && m.currentLinkIdx < len(links) {
 					words := strings.Fields(m.lines[m.currentLine])
 					var currentWord string
@@ -1113,7 +1117,7 @@ func (m UiModel) renderLinksDialog() string {
 		Width(dialogWidth - 4).
 		Render("Seleccionar Enlace")
 
-	links := []string{"Real Academia Española", "GoodReads"}
+	links := []string{"Real Academia Española", "GoodReads", "Traducir con Google"}
 	var linkItems []string
 	for i, link := range links {
 		style := lipgloss.NewStyle().
