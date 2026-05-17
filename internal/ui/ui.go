@@ -926,7 +926,7 @@ func (m UiModel) renderMainContent() string {
 					Padding(0, 1)
 				if i == m.currentNoteIdx {
 					noteStyle = noteStyle.
-						Background(greyColor). // Darker gray background
+						Background(greyColor).       // Darker gray background
 						Foreground(brightWhiteColor) // Bright white text
 				} else {
 					noteStyle = noteStyle.
@@ -968,7 +968,7 @@ func (m UiModel) renderMainContent() string {
 		statsText := strings.Join(statsLines, "\n")
 		statsStyle := lipgloss.NewStyle().
 			Foreground(brightWhiteColor). // Bright white
-			Background(darkGrayColor). // Darker gray
+			Background(darkGrayColor).    // Darker gray
 			Padding(1, 2).
 			Border(lipgloss.RoundedBorder(), true).
 			BorderForeground(cyanColor) // Cyan border
@@ -981,7 +981,16 @@ func (m UiModel) renderMainContent() string {
 	if total > 0 {
 		percent = float64(m.currentLine) / float64(total-1) * 100
 	}
-	lineInfo := fmt.Sprintf("Línea: %d/%d (%.4f%%)", m.currentLine+1, total, percent)
+	nextPercent := int(percent) + 1
+	linesToNextPercent := 0
+	if total > 1 {
+		lineAtNextPercent := int(float64(nextPercent) / 100.0 * float64(total-1))
+		linesToNextPercent = lineAtNextPercent - m.currentLine
+		if linesToNextPercent < 0 {
+			linesToNextPercent = 0
+		}
+	}
+	lineInfo := fmt.Sprintf("Línea: %d/%d (%.4f%% - %d)", m.currentLine+1, total, percent, linesToNextPercent)
 
 	// Mostrar información de búsqueda si hay resultados activos
 	searchInfo := ""
