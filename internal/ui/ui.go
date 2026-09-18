@@ -21,7 +21,8 @@ import (
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
-
+	"github.com/geordee/readability"
+	"github.com/neurosnap/sentences/english"
 	"github.com/taylorskalyo/goreader/epub"
 	"golang.org/x/net/html"
 )
@@ -54,7 +55,14 @@ type UiModel struct {
 	longestLineLength     int    // Length of the longest line
 	longestWord           string
 	topWords              []stats.WordCount
+	uniqueWords           int     // Number of distinct words
 	cumulativeWords       []int   // Cumulative words up to each line
+	sentenceCount         int
+	avgWordsPerSentence   float64
+	fleschEase            float64
+	fleschGrade           float64
+	textStandard          string
+	ttr                   float64 // Type-Token Ratio (lexical diversity)
 	totalReadingSeconds   float64 // Total reading time in seconds (loaded from progress)
 	totalReadWords        int     // Total words read (loaded from progress)
 	sessionReadingTime    float64 // Session reading time in seconds
@@ -292,6 +300,7 @@ func calculateStatistics(m *UiModel) {
 	var maxLen int
 	var longest string
 	var longestWordInLine string
+	seen := make(map[string]bool)
 	for _, line := range m.lines {
 		words := strings.Fields(line)
 		longestWord := stats.LongestWord(&words)
@@ -303,13 +312,37 @@ func calculateStatistics(m *UiModel) {
 			maxLen = len(line)
 			longest = line
 		}
+		for _, w := range words {
+			seen[text.SanitizeWord(w)] = true
+		}
 	}
+	delete(seen, "")
 
 	m.totalWords = totalWords
+	m.uniqueWords = len(seen)
 	m.longestLine = longest
 	m.longestLineLength = maxLen
 	m.longestWord = longestWordInLine
 	m.topWords = stats.TopNFrequentWords(m.lines)
+
+	if m.totalWords > 0 {
+		m.ttr = float64(m.uniqueWords) / float64(m.totalWords) * 100
+	}
+
+	fullText := strings.Join(m.lines, " ")
+
+	ra := readability.NewAnalysis(fullText)
+	m.fleschEase = ra.FleschReadingEase()
+	m.fleschGrade = ra.FleschKincaidGrade()
+	m.textStandard = ra.TextStandardString()
+
+	if tokenizer, err := english.NewSentenceTokenizer(nil); err == nil {
+		sentences := tokenizer.Tokenize(fullText)
+		m.sentenceCount = len(sentences)
+		if m.sentenceCount > 0 {
+			m.avgWordsPerSentence = float64(m.totalWords) / float64(m.sentenceCount)
+		}
+	}
 }
 
 func (m UiModel) Init() tea.Cmd {
@@ -951,18 +984,63 @@ func (m UiModel) renderMainContent() string {
 
 		wpm := m.getCurrentWPM()
 
+		totalReadMins := float64(m.totalWords) / wpm
+		totalReadHours := int(totalReadMins / 60)
+		totalReadMinsRem := int(totalReadMins) % 60
+		var totalReadStr string
+		if totalReadHours > 0 {
+			totalReadStr = fmt.Sprintf("%dh %dm", totalReadHours, totalReadMinsRem)
+		} else {
+			totalReadStr = fmt.Sprintf("%dm", totalReadMinsRem)
+		}
+
+		var uniquePct float64
+		if m.totalWords > 0 {
+			uniquePct = float64(m.uniqueWords) / float64(m.totalWords) * 100
+		}
+
+		var avgWordsPerLine float64
+		if m.totalLines > 0 {
+			avgWordsPerLine = float64(m.totalWords) / float64(m.totalLines)
+		}
+
+		sessionSecs := int(m.sessionReadingTime)
+		sessionMins := sessionSecs / 60
+		sessionSecsRem := sessionSecs % 60
+		sessionStr := fmt.Sprintf("%dm %ds", sessionMins, sessionSecsRem)
+
+		fleschDesc := fleschEaseDescription(m.fleschEase)
+
 		statsLines := []string{
+			"── Texto ──────────────────────────────────",
 			"Líneas totales: " + boldStyle.Render(fmt.Sprintf("%d", m.totalLines)),
 			"Palabras totales: " + boldStyle.Render(fmt.Sprintf("%d", m.totalWords)),
+			"Oraciones: " + boldStyle.Render(fmt.Sprintf("%d", m.sentenceCount)),
+			"Promedio palabras por oración: " + boldStyle.Render(fmt.Sprintf("%.1f", m.avgWordsPerSentence)),
+			"Promedio palabras por línea: " + boldStyle.Render(fmt.Sprintf("%.1f", avgWordsPerLine)),
 			"Línea más larga: " + boldStyle.Render(fmt.Sprintf("%d caracteres", m.longestLineLength)),
-			italicStyle.Render(m.longestLine),
+			"  " + italicStyle.Render(m.longestLine),
 			"Palabra más larga: " + boldStyle.Render(m.longestWord),
+			"",
+			"── Vocabulario ────────────────────────────",
+			"Palabras únicas: " + boldStyle.Render(fmt.Sprintf("%d (%.1f%%)", m.uniqueWords, uniquePct)),
+			"Diversidad léxica (TTR): " + boldStyle.Render(fmt.Sprintf("%.1f%%", m.ttr)),
+			"",
+			"── Legibilidad ────────────────────────────",
+			"Flesch Reading Ease: " + boldStyle.Render(fmt.Sprintf("%.1f", m.fleschEase)) + "  " + italicStyle.Render(fleschDesc),
+			"Flesch-Kincaid Grade: " + boldStyle.Render(fmt.Sprintf("%.1f", m.fleschGrade)),
+			"Nivel de texto: " + boldStyle.Render(m.textStandard),
+			"",
+			"── Lectura ────────────────────────────────",
+			"Tiempo estimado total: " + boldStyle.Render(totalReadStr),
+			"Tiempo de sesión: " + boldStyle.Render(sessionStr),
 			"Velocidad de lectura: " + boldStyle.Render(fmt.Sprintf("%.0f WPM", wpm)),
 		}
 		if len(m.topWords) > 0 {
-			statsLines = append(statsLines, "Top palabras frecuentes:")
+			statsLines = append(statsLines, "")
+			statsLines = append(statsLines, "── Top palabras frecuentes ────────────────")
 			for i, wc := range m.topWords {
-				statsLines = append(statsLines, fmt.Sprintf("%d. %s: %d", i+1, wc.Word, wc.Count))
+				statsLines = append(statsLines, fmt.Sprintf("  %d. %s: %d", i+1, wc.Word, wc.Count))
 			}
 		}
 		statsText := strings.Join(statsLines, "\n")
@@ -1253,7 +1331,8 @@ func (m UiModel) renderWithDialog(dialog string) string {
 }
 
 func (m UiModel) renderHelpDialog() string {
-	dialogWidth := utils.Min(m.width-4, 70)
+	dialogWidth := utils.Min(m.width-4, 80)
+	colWidth := (dialogWidth - 6) / 2
 
 	title := lipgloss.NewStyle().
 		Foreground(brightWhiteColor).
@@ -1263,63 +1342,6 @@ func (m UiModel) renderHelpDialog() string {
 		Padding(0, 1).
 		Width(dialogWidth - 4).
 		Render("⌨️  ATAJOS DE TECLADO")
-
-	// Definir secciones de ayuda
-	sections := []struct {
-		title string
-		keys  [][]string
-	}{
-		{
-			title: "NAVEGACIÓN",
-			keys: [][]string{
-				{"j / ↓", "Línea siguiente"},
-				{"k / ↑", "Línea anterior"},
-				{"← / →", "Palabra anterior/siguiente"},
-				{"0", "Primera palabra de la línea"},
-				{"$", "Última palabra de la línea"},
-				{"g", "Ir a línea específica"},
-				{"PgUp/PgDn", "Página arriba/abajo"},
-			},
-		},
-		{
-			title: "BÚSQUEDA",
-			keys: [][]string{
-				{"/", "Abrir búsqueda"},
-				{"n", "Siguiente resultado"},
-				{"N (Shift+n)", "Resultado anterior"},
-			},
-		},
-		{
-			title: "TABS",
-			keys: [][]string{
-				{"1", "Tab Texto"},
-				{"2", "Tab Vocabulario"},
-				{"3", "Tab Notas"},
-				{"4", "Tab Estadísticas"},
-			},
-		},
-		{
-			title: "ACCIONES",
-			keys: [][]string{
-				{"w", "Agregar palabra al vocabulario"},
-				{"c", "Copiar palabra al portapapeles"},
-				{"n", "Crear nueva nota"},
-				{"o", "Abrir enlaces (RAE/GoodReads)"},
-				{"d", "Eliminar (vocabulario/nota)"},
-				{"s", "Guardar progreso"},
-			},
-		},
-		{
-			title: "GENERAL",
-			keys: [][]string{
-				{"?", "Mostrar esta ayuda"},
-				{"Esc", "Cerrar diálogos"},
-				{"q / Ctrl+C", "Salir"},
-			},
-		},
-	}
-
-	var helpContent strings.Builder
 
 	keyStyle := lipgloss.NewStyle().
 		Foreground(brightYellowColor).
@@ -1331,24 +1353,65 @@ func (m UiModel) renderHelpDialog() string {
 	sectionTitleStyle := lipgloss.NewStyle().
 		Foreground(cyanColor).
 		Bold(true).
-		Underline(true).
-		MarginTop(1)
+		Underline(true)
 
-	for _, section := range sections {
-		helpContent.WriteString(sectionTitleStyle.Render(section.title) + "\n")
-		for _, key := range section.keys {
-			line := fmt.Sprintf("  %s  %s",
+	renderSection := func(sectionTitle string, keys [][]string) string {
+		var sb strings.Builder
+		sb.WriteString(sectionTitleStyle.Render(sectionTitle) + "\n")
+		for _, key := range keys {
+			sb.WriteString(fmt.Sprintf("  %s  %s\n",
 				keyStyle.Render(fmt.Sprintf("%-12s", key[0])),
-				descStyle.Render(key[1]))
-			helpContent.WriteString(line + "\n")
+				descStyle.Render(key[1])))
 		}
+		return sb.String()
 	}
+
+	leftCol := lipgloss.NewStyle().Width(colWidth).Render(
+		renderSection("NAVEGACIÓN", [][]string{
+			{"j / ↓", "Línea siguiente"},
+			{"k / ↑", "Línea anterior"},
+			{"← / →", "Palabra ant/sig"},
+			{"0", "Primera palabra"},
+			{"$", "Última palabra"},
+			{"g", "Ir a línea"},
+			{"PgUp/PgDn", "Página arriba/abajo"},
+		}) + "\n" +
+			renderSection("BÚSQUEDA", [][]string{
+				{"/", "Abrir búsqueda"},
+				{"n", "Siguiente resultado"},
+				{"N (Shift+n)", "Resultado anterior"},
+			}),
+	)
+
+	rightCol := lipgloss.NewStyle().Width(colWidth).Render(
+		renderSection("TABS", [][]string{
+			{"1", "Tab Texto"},
+			{"2", "Tab Vocabulario"},
+			{"3", "Tab Notas"},
+			{"4", "Tab Estadísticas"},
+		}) + "\n" +
+			renderSection("ACCIONES", [][]string{
+				{"w", "Agregar al vocabulario"},
+				{"c", "Copiar palabra"},
+				{"C", "Copiar línea completa"},
+				{"Ctrl+n", "Crear nota"},
+				{"o", "Abrir enlaces"},
+				{"d", "Eliminar elemento"},
+				{"s", "Guardar progreso"},
+			}) + "\n" +
+			renderSection("GENERAL", [][]string{
+				{"?", "Mostrar esta ayuda"},
+				{"Esc", "Cerrar diálogos"},
+				{"q / Ctrl+C", "Salir"},
+			}),
+	)
+
+	columns := lipgloss.JoinHorizontal(lipgloss.Top, leftCol, rightCol)
 
 	contentBox := lipgloss.NewStyle().
 		Width(dialogWidth - 4).
-		MaxHeight(m.height - 10).
 		Padding(1).
-		Render(helpContent.String())
+		Render(columns)
 
 	closeHint := lipgloss.NewStyle().
 		Foreground(mediumGrayColor).
@@ -1368,6 +1431,25 @@ func (m UiModel) renderHelpDialog() string {
 		Render(dialogContent)
 
 	return dialog
+}
+
+func fleschEaseDescription(score float64) string {
+	switch {
+	case score >= 90:
+		return "(muy fácil)"
+	case score >= 80:
+		return "(fácil)"
+	case score >= 70:
+		return "(bastante fácil)"
+	case score >= 60:
+		return "(estándar)"
+	case score >= 50:
+		return "(bastante difícil)"
+	case score >= 30:
+		return "(difícil)"
+	default:
+		return "(muy difícil)"
+	}
 }
 
 func browserOpenURLCommand(osName, url string) *exec.Cmd {
