@@ -621,10 +621,16 @@ func (m UiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					}
 				case keyLeft:
 					if len(palabras) > 0 {
+						m.lastActionTime = time.Now() // Update time but don't add to session (backtracking)
 						m.currentWordIdx = (m.currentWordIdx - 1 + len(palabras)) % len(palabras)
 					}
 				case keyRight:
 					if len(palabras) > 0 {
+						delta := time.Since(m.lastActionTime).Seconds()
+						if delta < 300 { // Ignore long idle periods (e.g., >5 min)
+							m.sessionReadingTime += delta
+						}
+						m.lastActionTime = time.Now()
 						m.currentWordIdx = (m.currentWordIdx + 1) % len(palabras)
 					}
 				case keyAddToVocabulary:
