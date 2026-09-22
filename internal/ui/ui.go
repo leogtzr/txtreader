@@ -13,6 +13,8 @@ import (
 	"time"
 	"txtreader/internal/progress"
 	"txtreader/internal/text"
+	"txtreader/internal/text/esreadability"
+	"txtreader/internal/text/lang"
 	"txtreader/internal/text/stats"
 	"txtreader/internal/utils"
 
@@ -62,6 +64,7 @@ type UiModel struct {
 	fleschEase            float64
 	fleschGrade           float64
 	textStandard          string
+	isEnglishText         bool // Whether the text was detected as English (selects readability strategy)
 	ttr                   float64 // Type-Token Ratio (lexical diversity)
 	totalReadingSeconds   float64 // Total reading time in seconds (loaded from progress)
 	totalReadWords        int     // Total words read (loaded from progress)
@@ -330,18 +333,27 @@ func calculateStatistics(m *UiModel) {
 	}
 
 	fullText := strings.Join(m.lines, " ")
+	m.isEnglishText = lang.IsEnglish(fullText)
 
-	ra := readability.NewAnalysis(fullText)
-	m.fleschEase = ra.FleschReadingEase()
-	m.fleschGrade = ra.FleschKincaidGrade()
-	m.textStandard = ra.TextStandardString()
+	if m.isEnglishText {
+		ra := readability.NewAnalysis(fullText)
+		m.fleschEase = ra.FleschReadingEase()
+		m.fleschGrade = ra.FleschKincaidGrade()
+		m.textStandard = ra.TextStandardString()
 
-	if tokenizer, err := english.NewSentenceTokenizer(nil); err == nil {
-		sentences := tokenizer.Tokenize(fullText)
-		m.sentenceCount = len(sentences)
-		if m.sentenceCount > 0 {
-			m.avgWordsPerSentence = float64(m.totalWords) / float64(m.sentenceCount)
+		if tokenizer, err := english.NewSentenceTokenizer(nil); err == nil {
+			sents := tokenizer.Tokenize(fullText)
+			m.sentenceCount = len(sents)
 		}
+	} else {
+		esa := esreadability.Analyze(fullText)
+		m.fleschEase = esa.Ease
+		m.textStandard = esreadability.InflesZLabel(esa.Ease)
+		m.sentenceCount = esa.SentenceCount
+	}
+
+	if m.sentenceCount > 0 {
+		m.avgWordsPerSentence = float64(m.totalWords) / float64(m.sentenceCount)
 	}
 }
 
@@ -1015,8 +1027,6 @@ func (m UiModel) renderMainContent() string {
 		sessionSecsRem := sessionSecs % 60
 		sessionStr := fmt.Sprintf("%dm %ds", sessionMins, sessionSecsRem)
 
-		fleschDesc := fleschEaseDescription(m.fleschEase)
-
 		statsLines := []string{
 			"── Texto ──────────────────────────────────",
 			"Líneas totales: " + boldStyle.Render(fmt.Sprintf("%d", m.totalLines)),
@@ -1033,15 +1043,26 @@ func (m UiModel) renderMainContent() string {
 			"Diversidad léxica (TTR): " + boldStyle.Render(fmt.Sprintf("%.1f%%", m.ttr)),
 			"",
 			"── Legibilidad ────────────────────────────",
-			"Flesch Reading Ease: " + boldStyle.Render(fmt.Sprintf("%.1f", m.fleschEase)) + "  " + italicStyle.Render(fleschDesc),
-			"Flesch-Kincaid Grade: " + boldStyle.Render(fmt.Sprintf("%.1f", m.fleschGrade)),
-			"Nivel de texto: " + boldStyle.Render(m.textStandard),
+		}
+		if m.isEnglishText {
+			fleschDesc := fleschEaseDescription(m.fleschEase)
+			statsLines = append(statsLines,
+				"Flesch Reading Ease: "+boldStyle.Render(fmt.Sprintf("%.1f", m.fleschEase))+"  "+italicStyle.Render(fleschDesc),
+				"Flesch-Kincaid Grade: "+boldStyle.Render(fmt.Sprintf("%.1f", m.fleschGrade)),
+				"Nivel de texto: "+boldStyle.Render(m.textStandard),
+			)
+		} else {
+			statsLines = append(statsLines,
+				"Índice Szigriszt-Pazos: "+boldStyle.Render(fmt.Sprintf("%.1f", m.fleschEase))+"  "+italicStyle.Render(m.textStandard),
+			)
+		}
+		statsLines = append(statsLines,
 			"",
 			"── Lectura ────────────────────────────────",
-			"Tiempo estimado total: " + boldStyle.Render(totalReadStr),
-			"Tiempo de sesión: " + boldStyle.Render(sessionStr),
-			"Velocidad de lectura: " + boldStyle.Render(fmt.Sprintf("%.0f WPM", wpm)),
-		}
+			"Tiempo estimado total: "+boldStyle.Render(totalReadStr),
+			"Tiempo de sesión: "+boldStyle.Render(sessionStr),
+			"Velocidad de lectura: "+boldStyle.Render(fmt.Sprintf("%.0f WPM", wpm)),
+		)
 		if len(m.topWords) > 0 {
 			statsLines = append(statsLines, "")
 			statsLines = append(statsLines, "── Top palabras frecuentes ────────────────")
